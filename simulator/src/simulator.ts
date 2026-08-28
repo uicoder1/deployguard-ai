@@ -10,9 +10,9 @@ export class ProductionSimulator {
 
   constructor() {
     this.services = new Map(INITIAL_SERVICES.map(s => [s.id, { ...s }]));
-    this.deployments = [...INITIAL_DEPLOYMENTS];
-    this.incidents = [...INITIAL_INCIDENTS];
-    this.logs = [...INITIAL_LOGS];
+    this.deployments = INITIAL_DEPLOYMENTS.map(d => ({ ...d }));
+    this.incidents = INITIAL_INCIDENTS.map(i => ({ ...i }));
+    this.logs = INITIAL_LOGS.map(l => ({ ...l }));
     this.rollbackAudits = [];
   }
 
@@ -129,7 +129,7 @@ export class ProductionSimulator {
    * Retrieve all recorded rollback audit logs.
    */
   public getRollbackAudits(): RollbackAuditRecord[] {
-    return [...this.rollbackAudits];
+    return this.rollbackAudits.map(record => ({ ...record }));
   }
 
   /**
@@ -151,6 +151,13 @@ export class ProductionSimulator {
       return {
         success: false,
         error: `Error: Deployment with ID '${deploymentId}' was not found.`
+      };
+    }
+
+    if (deployment.status === 'rolled_back') {
+      return {
+        success: false,
+        error: `Error: Deployment #${deploymentId} has already been rolled back.`
       };
     }
 
@@ -225,7 +232,7 @@ export class ProductionSimulator {
       restoredVersion,
       simulated: true,
       serviceStatus: this.getServiceStatus(service.id),
-      auditRecord
+      auditRecord: { ...auditRecord }
     };
   }
 }
