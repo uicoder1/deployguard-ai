@@ -50,3 +50,14 @@ export interface GetLogsOptions {
   level?: LogLevel;
   limit?: number;
 }
+
+export interface RollbackAuditRecord {
+  timestamp: string;
+  deploymentId: string;
+  service: string;
+  fromVersion: string;
+  restoredVersion: string;
+  reason: string;
+  simulated: boolean;
+  resultingStatus: string;
+}

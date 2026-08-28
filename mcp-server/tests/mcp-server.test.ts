@@ -209,6 +209,14 @@ describe('DeployGuard Production MCP Streamable HTTP Integration Tests', () => {
     assert.equal(result.restoredVersion, '1.8.2');
     assert.equal(result.simulated, true);
     assert.equal(result.resultingServiceStatus.status, 'healthy');
+
+    assert.ok(result.auditRecord);
+    assert.equal(result.auditRecord.deploymentId, '184');
+    assert.equal(result.auditRecord.service, 'payment-api');
+    assert.equal(result.auditRecord.fromVersion, '1.8.3');
+    assert.equal(result.auditRecord.restoredVersion, '1.8.2');
+    assert.equal(result.auditRecord.simulated, true);
+    assert.equal(result.auditRecord.resultingStatus, 'healthy');
   });
 });
 

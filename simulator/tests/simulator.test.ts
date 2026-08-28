@@ -116,5 +116,41 @@ describe('DeployGuard Production Simulator Tests', () => {
     assert.ok(result.error && result.error.includes('not the currently active deployment'));
   });
 
+  it('should maintain an in-memory audit trail of successful rollbacks', () => {
+    const sim = new ProductionSimulator();
+    assert.equal(sim.getRollbackAudits().length, 0);
+
+    const result = sim.rollbackDeployment('184');
+    assert.equal(result.success, true);
+    assert.ok(result.auditRecord);
+
+    const audits = sim.getRollbackAudits();
+    assert.equal(audits.length, 1);
+
+    const record = audits[0];
+    assert.ok(record.timestamp);
+    assert.equal(record.deploymentId, '184');
+    assert.equal(record.service, 'payment-api');
+    assert.equal(record.fromVersion, '1.8.3');
+    assert.equal(record.restoredVersion, '1.8.2');
+    assert.equal(record.simulated, true);
+    assert.equal(record.resultingStatus, 'healthy');
+    assert.ok(record.reason.includes('184'));
+  });
+
+  it('should not create an audit record when rollback fails', () => {
+    const sim = new ProductionSimulator();
+    assert.equal(sim.getRollbackAudits().length, 0);
+
+    const failResult1 = sim.rollbackDeployment('invalid-id');
+    assert.equal(failResult1.success, false);
+    assert.equal(sim.getRollbackAudits().length, 0);
+
+    const failResult2 = sim.rollbackDeployment('183');
+    assert.equal(failResult2.success, false);
+    assert.equal(sim.getRollbackAudits().length, 0);
+  });
+
 });
+
 
