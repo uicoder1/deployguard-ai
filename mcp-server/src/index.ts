@@ -152,7 +152,8 @@ export function createServerInstance(): McpServer {
                 previousVersion: result.previousVersion,
                 restoredVersion: result.restoredVersion,
                 simulated: result.simulated,
-                resultingServiceStatus: result.serviceStatus
+                resultingServiceStatus: result.serviceStatus,
+                auditRecord: result.auditRecord
               },
               null,
               2

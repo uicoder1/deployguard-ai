@@ -116,5 +116,95 @@ describe('DeployGuard Production Simulator Tests', () => {
     assert.ok(result.error && result.error.includes('not the currently active deployment'));
   });
 
+  it('should maintain an in-memory audit trail of successful rollbacks', () => {
+    const sim = new ProductionSimulator();
+    assert.equal(sim.getRollbackAudits().length, 0);
+
+    const result = sim.rollbackDeployment('184');
+    assert.equal(result.success, true);
+    assert.ok(result.auditRecord);
+
+    const audits = sim.getRollbackAudits();
+    assert.equal(audits.length, 1);
+
+    const record = audits[0];
+    assert.ok(record.timestamp);
+    assert.equal(record.deploymentId, '184');
+    assert.equal(record.service, 'payment-api');
+    assert.equal(record.fromVersion, '1.8.3');
+    assert.equal(record.restoredVersion, '1.8.2');
+    assert.equal(record.simulated, true);
+    assert.equal(record.resultingStatus, 'healthy');
+    assert.ok(record.reason.includes('184'));
+  });
+
+  it('should not create an audit record when rollback fails', () => {
+    const sim = new ProductionSimulator();
+    assert.equal(sim.getRollbackAudits().length, 0);
+
+    const failResult1 = sim.rollbackDeployment('invalid-id');
+    assert.equal(failResult1.success, false);
+    assert.equal(sim.getRollbackAudits().length, 0);
+
+    const failResult2 = sim.rollbackDeployment('183');
+    assert.equal(failResult2.success, false);
+    assert.equal(sim.getRollbackAudits().length, 0);
+  });
+
+  it('should reject repeated rollback of an already rolled-back deployment (Bug 1 regression)', () => {
+    const sim = new ProductionSimulator();
+
+    // 1. first rollback succeeds
+    const firstResult = sim.rollbackDeployment('184');
+    assert.equal(firstResult.success, true);
+    assert.equal(sim.getRollbackAudits().length, 1);
+
+    // 2. second rollback fails
+    const secondResult = sim.rollbackDeployment('184');
+    assert.equal(secondResult.success, false);
+    assert.ok(secondResult.error && secondResult.error.includes('already been rolled back'));
+
+    // 3. audit record count remains unchanged after second attempt
+    const audits = sim.getRollbackAudits();
+    assert.equal(audits.length, 1);
+
+    // 4. no 1.8.2 -> 1.8.2 audit record is created
+    assert.equal(audits[0].fromVersion, '1.8.3');
+    assert.equal(audits[0].restoredVersion, '1.8.2');
+    assert.ok(!audits.some(a => a.fromVersion === '1.8.2' && a.restoredVersion === '1.8.2'));
+  });
+
+  it('should ensure getRollbackAudits returns immutable copies of audit records (Bug 2 regression)', () => {
+    const sim = new ProductionSimulator();
+    sim.rollbackDeployment('184');
+
+    const audits = sim.getRollbackAudits();
+    assert.equal(audits[0].service, 'payment-api');
+
+    // Mutate returned audit record
+    audits[0].service = 'MUTATED_SERVICE';
+    audits[0].fromVersion = 'MUTATED_VERSION';
+
+    // Verify stored audit record remains unchanged
+    const freshAudits = sim.getRollbackAudits();
+    assert.equal(freshAudits[0].service, 'payment-api');
+    assert.equal(freshAudits[0].fromVersion, '1.8.3');
+  });
+
+  it('should ensure rollbackDeployment auditRecord return property is immutable (Bug 2 regression)', () => {
+    const sim = new ProductionSimulator();
+    const result = sim.rollbackDeployment('184');
+    assert.ok(result.auditRecord);
+
+    // Mutate auditRecord property on result object
+    result.auditRecord.service = 'MUTATED_SERVICE';
+
+    // Verify stored audit record remains unchanged
+    const storedAudits = sim.getRollbackAudits();
+    assert.equal(storedAudits[0].service, 'payment-api');
+  });
+
 });
+
+
 

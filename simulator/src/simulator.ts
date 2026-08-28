@@ -1,4 +1,4 @@
-import { Service, Deployment, Incident, LogEntry, GetLogsOptions, HealthStatus } from './types.js';
+import { Service, Deployment, Incident, LogEntry, GetLogsOptions, HealthStatus, RollbackAuditRecord } from './types.js';
 import { INITIAL_SERVICES, INITIAL_DEPLOYMENTS, INITIAL_INCIDENTS, INITIAL_LOGS } from './data.js';
 
 export class ProductionSimulator {
@@ -6,12 +6,14 @@ export class ProductionSimulator {
   private deployments: Deployment[];
   private incidents: Incident[];
   private logs: LogEntry[];
+  private rollbackAudits: RollbackAuditRecord[];
 
   constructor() {
     this.services = new Map(INITIAL_SERVICES.map(s => [s.id, { ...s }]));
-    this.deployments = [...INITIAL_DEPLOYMENTS];
-    this.incidents = [...INITIAL_INCIDENTS];
-    this.logs = [...INITIAL_LOGS];
+    this.deployments = INITIAL_DEPLOYMENTS.map(d => ({ ...d }));
+    this.incidents = INITIAL_INCIDENTS.map(i => ({ ...i }));
+    this.logs = INITIAL_LOGS.map(l => ({ ...l }));
+    this.rollbackAudits = [];
   }
 
   /**
@@ -124,6 +126,13 @@ export class ProductionSimulator {
   }
 
   /**
+   * Retrieve all recorded rollback audit logs.
+   */
+  public getRollbackAudits(): RollbackAuditRecord[] {
+    return this.rollbackAudits.map(record => ({ ...record }));
+  }
+
+  /**
    * Safely simulate rolling back a service deployment to the previous successful version.
    */
   public rollbackDeployment(deploymentId: string): {
@@ -135,12 +144,20 @@ export class ProductionSimulator {
     restoredVersion?: string;
     simulated?: boolean;
     serviceStatus?: ReturnType<ProductionSimulator['getServiceStatus']>;
+    auditRecord?: RollbackAuditRecord;
   } {
     const deployment = this.deployments.find(d => d.id === deploymentId);
     if (!deployment) {
       return {
         success: false,
         error: `Error: Deployment with ID '${deploymentId}' was not found.`
+      };
+    }
+
+    if (deployment.status === 'rolled_back') {
+      return {
+        success: false,
+        error: `Error: Deployment #${deploymentId} has already been rolled back.`
       };
     }
 
@@ -195,6 +212,18 @@ export class ProductionSimulator {
       incident.status = 'RESOLVED';
     }
 
+    const auditRecord: RollbackAuditRecord = {
+      timestamp: service.updatedAt,
+      deploymentId,
+      service: service.id,
+      fromVersion: previousVersion,
+      restoredVersion,
+      reason: `Simulated rollback of deployment #${deploymentId} for service ${service.id}`,
+      simulated: true,
+      resultingStatus: service.status
+    };
+    this.rollbackAudits.push(auditRecord);
+
     return {
       success: true,
       deploymentId,
@@ -202,7 +231,8 @@ export class ProductionSimulator {
       previousVersion,
       restoredVersion,
       simulated: true,
-      serviceStatus: this.getServiceStatus(service.id)
+      serviceStatus: this.getServiceStatus(service.id),
+      auditRecord: { ...auditRecord }
     };
   }
 }
