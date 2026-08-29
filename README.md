@@ -111,3 +111,35 @@ DeployGuard addresses this problem by providing an agent that can:
                            │
                            ▼
                      Audit Record
+
+
+---
+
+---
+
+## 🔎 Qodo Code Review Evidence
+
+DeployGuard's substantive hackathon changes were developed through GitHub pull requests and reviewed by Qodo before merging.
+
+### Representative reviewed PR
+
+**PR #2: feat: add audited rollback remediation**
+
+https://github.com/uicoder1/deployguard-ai/pull/2
+
+Qodo reviewed the rollback remediation and identified two reliability and correctness issues:
+
+1. Rollback audit records could be lost or incorrectly handled after a successful rollback.
+2. Audit records needed to remain reliable as historical records after remediation.
+
+We addressed the valid findings by updating the rollback flow and audit handling so that successful rollback actions produce an audit record and the resulting service state is refreshed correctly.
+
+The PR was reviewed by Qodo, the identified findings were resolved, and the updated implementation was reviewed before being merged into `main`.
+
+The Qodo review history and resolved findings are publicly available in the pull request.
+
+---
+
+## 🤖 AI Development Disclosure
+
+AI coding assistants were used during development to assist with implementation, debugging, documentation, and code review preparation. The project architecture, technical decisions, testing, and final implementation were reviewed and understood by the project author.
