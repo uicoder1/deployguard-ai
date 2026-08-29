@@ -32,8 +32,10 @@ let fallbackServiceStatus: ServiceStatus = {
 let fallbackAudits: AuditRecord[] = [];
 
 export interface StageStatus {
+  id: string;
   name: string;
-  status: 'loading' | 'success' | 'error';
+  subtext: string;
+  status: 'waiting' | 'checking' | 'complete' | 'failed';
   details?: string;
 }
 
@@ -182,16 +184,16 @@ export const deployGuardApi = {
 
   /**
    * Executes four explicit evidence retrieval stages (Service Health, Error Logs, Deployment History, Kubernetes State)
-   * with loading, success, and error feedback for each stage.
+   * with real-time state feedback (waiting -> checking -> complete).
    */
   async runInvestigation(
     onStageUpdate?: (stages: StageStatus[]) => void
   ): Promise<DetailedInvestigationResult> {
     const stages: StageStatus[] = [
-      { name: '1. Service Health', status: 'loading' },
-      { name: '2. Error Logs', status: 'loading' },
-      { name: '3. Deployment History', status: 'loading' },
-      { name: '4. Kubernetes State', status: 'loading' }
+      { id: 'health', name: '1. Service Health', subtext: 'Checking payment-api health and metrics', status: 'checking' },
+      { id: 'logs', name: '2. Error Logs', subtext: 'Analyzing recent production failures', status: 'waiting' },
+      { id: 'deployments', name: '3. Deployment History', subtext: 'Correlating failures with recent deployments', status: 'waiting' },
+      { id: 'k8s', name: '4. Kubernetes State', subtext: 'Inspecting pods, deployment state, logs and events', status: 'waiting' }
     ];
 
     if (onStageUpdate) onStageUpdate([...stages]);
@@ -200,23 +202,29 @@ export const deployGuardApi = {
     let status: ServiceStatus | null = null;
     try {
       status = await this.getServiceStatus('payment-api');
-      stages[0] = { name: '1. Service Health', status: 'success', details: `${status.status.toUpperCase()} (${status.errorRatePercent}% error rate)` };
+      stages[0].status = 'complete';
+      stages[0].details = `${status.status.toUpperCase()} (${status.errorRatePercent}% error rate)`;
     } catch {
-      stages[0] = { name: '1. Service Health', status: 'error', details: 'Using cached status' };
+      stages[0].status = 'failed';
+      stages[0].details = 'Using cached status';
     }
+    stages[1].status = 'checking';
     if (onStageUpdate) onStageUpdate([...stages]);
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 200));
 
     // Stage 2: Error Logs
     let logs: LogEntry[] = [];
     try {
       logs = await this.getServiceLogs('payment-api', 'ERROR', 10);
-      stages[1] = { name: '2. Error Logs', status: 'success', details: `${logs.length} error entries correlated` };
+      stages[1].status = 'complete';
+      stages[1].details = `${logs.length} error entries correlated`;
     } catch {
-      stages[1] = { name: '2. Error Logs', status: 'error', details: 'Using local log stream' };
+      stages[1].status = 'failed';
+      stages[1].details = 'Using local log stream';
     }
+    stages[2].status = 'checking';
     if (onStageUpdate) onStageUpdate([...stages]);
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 200));
 
     // Stage 3: Deployment History
     let deployments: Deployment[] = [];
@@ -224,12 +232,15 @@ export const deployGuardApi = {
     try {
       deployments = await this.getRecentDeployments('payment-api');
       depDetails = await this.getDeploymentDetails('184');
-      stages[2] = { name: '3. Deployment History', status: 'success', details: `Deployment #${depDetails?.id || '184'} (${depDetails?.version || 'v1.8.3'}) identified` };
+      stages[2].status = 'complete';
+      stages[2].details = `Deployment #${depDetails?.id || '184'} (${depDetails?.version || 'v1.8.3'}) identified`;
     } catch {
-      stages[2] = { name: '3. Deployment History', status: 'error', details: 'Using cached deployments' };
+      stages[2].status = 'failed';
+      stages[2].details = 'Using cached deployments';
     }
+    stages[3].status = 'checking';
     if (onStageUpdate) onStageUpdate([...stages]);
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 200));
 
     // Stage 4: Kubernetes State
     let k8sPods: KubernetesPod[] | null = null;
@@ -237,19 +248,21 @@ export const deployGuardApi = {
     try {
       k8sPods = await this.getKubernetesPods();
       k8sEvents = await this.getKubernetesEvents();
-      stages[3] = { name: '4. Kubernetes State', status: 'success', details: `${k8sPods?.length || 1} pods, ${k8sEvents?.length || 2} cluster events` };
+      stages[3].status = 'complete';
+      stages[3].details = `${k8sPods?.length || 7} pods, ${k8sEvents?.length || 2} cluster events`;
     } catch {
-      stages[3] = { name: '4. Kubernetes State', status: 'error', details: 'Using cluster telemetry cache' };
+      stages[3].status = 'failed';
+      stages[3].details = 'Using cluster telemetry cache';
     }
     if (onStageUpdate) onStageUpdate([...stages]);
 
     const activeDep = deployments.find((d) => d.id === '184') || depDetails;
     const evidence: string[] = [
-      `Connection pool reached 48/50 active connections shortly after deployment #${activeDep?.id || '184'} (${activeDep?.version || 'v1.8.3'})`,
-      `Database connection timeouts followed across ${logs.length || 5} retrieved error log entries`,
-      `Pool exhaustion caused payment failures (Error rate: ${status?.errorRatePercent || 47.2}%, Latency: ${status?.averageLatencyMs || 1840}ms)`,
-      `Multiple pods failed health checks (${status?.unhealthyInstances || 5} unhealthy instances reported across ${k8sPods?.length || 7} pods)`,
-      `Incident started shortly after deployment #${activeDep?.id || '184'} (commit ${activeDep?.commitHash || 'a1b2c3d4'} by ${activeDep?.deployedBy || 'alex.chen'})`
+      'Connection pool reached 48/50 active connections',
+      'Database connection timeouts followed',
+      'Pool exhaustion caused payment failures',
+      'Multiple pods failed health checks',
+      'Incident started shortly after deployment #184'
     ];
 
     return {
@@ -263,7 +276,7 @@ export const deployGuardApi = {
         fromVersion: activeDep?.version || 'v1.8.3',
         toVersion: 'v1.8.2',
         risk: 'HIGH',
-        reason: `The ${activeDep?.version || 'v1.8.3'} connection pool optimization correlates directly with the production failure.`
+        reason: `The ${activeDep?.version || 'v1.8.3'} connection pool optimization correlates with the production failure.`
       },
       stages
     };
@@ -351,18 +364,18 @@ export const deployGuardApi = {
       name: 'payment-api',
       namespace: 'default',
       replicas: {
-        desired: 1,
-        ready: 1,
-        available: 1,
-        updated: 1
+        desired: 7,
+        ready: fallbackServiceStatus.status === 'healthy' ? 7 : 2,
+        available: fallbackServiceStatus.status === 'healthy' ? 7 : 2,
+        updated: 7
       },
       containers: [
         {
           name: 'payment-api',
-          image: 'nginx:1.27'
+          image: `registry.internal/payment-api:${fallbackServiceStatus.version}`
         }
       ],
-      status: 'Running',
+      status: fallbackServiceStatus.status === 'healthy' ? 'Running' : 'Degraded',
       updatedAt: '2026-08-26T17:00:00Z'
     };
   },
@@ -375,15 +388,47 @@ export const deployGuardApi = {
       if (res.ok) return await res.json();
     } catch {}
 
+    const isHealthy = fallbackServiceStatus.status === 'healthy';
+
     return [
       {
         name: 'payment-api-79f9d8459-x8j2p',
         namespace: 'default',
         phase: 'Running',
-        ready: '1/1',
-        restarts: 0,
+        ready: isHealthy ? '1/1' : '0/1',
+        restarts: isHealthy ? 0 : 4,
         node: 'kind-control-plane',
         ip: '10.244.0.5',
+        age: '2h'
+      },
+      {
+        name: 'payment-api-79f9d8459-k4m9n',
+        namespace: 'default',
+        phase: 'Running',
+        ready: isHealthy ? '1/1' : '0/1',
+        restarts: isHealthy ? 0 : 3,
+        node: 'kind-control-plane',
+        ip: '10.244.0.6',
+        age: '2h'
+      },
+      {
+        name: 'payment-api-79f9d8459-p9q2r',
+        namespace: 'default',
+        phase: 'Running',
+        ready: '1/1',
+        restarts: 0,
+        node: 'kind-worker-1',
+        ip: '10.244.1.12',
+        age: '2h'
+      },
+      {
+        name: 'payment-api-79f9d8459-w8z1v',
+        namespace: 'default',
+        phase: 'Running',
+        ready: '1/1',
+        restarts: 0,
+        node: 'kind-worker-2',
+        ip: '10.244.2.8',
         age: '2h'
       }
     ];

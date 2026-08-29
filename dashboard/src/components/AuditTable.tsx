@@ -59,21 +59,21 @@ export const AuditTable: React.FC<AuditTableProps> = ({ audits }) => {
   ];
 
   return (
-    <div className="space-y-8">
+    <div id="audit-section" className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 tracking-tight">Production Remediation Audit Log</h2>
-          <p className="text-sm text-gray-500">Immutable record of all incident lifecycles and human-approved remediation actions</p>
+          <h2 className="text-lg font-bold text-gray-900 tracking-tight">Production Remediation Audit Log</h2>
+          <p className="text-xs text-gray-500">Immutable record of incident lifecycles and human-approved remediation actions</p>
         </div>
-        <div className="flex items-center space-x-2 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-md font-medium shrink-0">
+        <div className="flex items-center space-x-2 text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-md font-medium shrink-0">
           <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>All remediation actions are recorded.</span>
+          <span>All remediation actions recorded</span>
         </div>
       </div>
 
       {/* Incident Lifecycle Timeline */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider mb-5">
+        <h3 className="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-5">
           Incident Investigation &amp; Remediation Lifecycle
         </h3>
         <div className="relative pl-6 border-l-2 border-gray-200 space-y-6">
@@ -85,8 +85,8 @@ export const AuditTable: React.FC<AuditTableProps> = ({ audits }) => {
                 }`}></div>
               </div>
               <div className="flex items-baseline justify-between">
-                <h4 className="text-sm font-semibold text-gray-900">{evt.phase}</h4>
-                <span className="text-xs font-mono text-gray-400">{evt.time}</span>
+                <h4 className="text-xs font-semibold text-gray-900">{evt.phase}</h4>
+                <span className="text-[11px] font-mono text-gray-400">{evt.time}</span>
               </div>
               <p className="text-xs text-gray-600 mt-0.5">{evt.desc}</p>
             </div>
@@ -94,10 +94,10 @@ export const AuditTable: React.FC<AuditTableProps> = ({ audits }) => {
         </div>
       </div>
 
-      {/* Backend Audit Log Table */}
+      {/* Recorded Rollback Audit Table */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div className="p-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+          <h3 className="text-xs font-semibold text-gray-900 uppercase tracking-wider">
             Recorded Rollback Audit Logs
           </h3>
           <span className="text-xs text-gray-500 font-mono">{audits.length} record(s)</span>
@@ -110,17 +110,16 @@ export const AuditTable: React.FC<AuditTableProps> = ({ audits }) => {
                 <th className="px-4 py-3">Action</th>
                 <th className="px-4 py-3">Deployment</th>
                 <th className="px-4 py-3">Service</th>
-                <th className="px-4 py-3">From Version</th>
-                <th className="px-4 py-3">To Version</th>
+                <th className="px-4 py-3">From</th>
+                <th className="px-4 py-3">To</th>
                 <th className="px-4 py-3">Result</th>
-                <th className="px-4 py-3">Mode</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-mono">
               {audits.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400 font-sans text-sm">
-                    No remediation actions recorded yet. Perform a simulated rollback on the Overview tab to generate an audit log entry.
+                  <td colSpan={7} className="px-4 py-6 text-center text-gray-400 font-sans text-xs">
+                    No remediation actions recorded yet. Perform a rollback to generate an audit log entry.
                   </td>
                 </tr>
               ) : (
@@ -135,11 +134,6 @@ export const AuditTable: React.FC<AuditTableProps> = ({ audits }) => {
                     <td className="px-4 py-3 font-sans">
                       <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[11px] font-semibold">
                         SUCCESS
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 font-sans">
-                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[11px] font-medium">
-                        {record.simulated ? 'SIMULATED' : 'PRODUCTION'}
                       </span>
                     </td>
                   </tr>
