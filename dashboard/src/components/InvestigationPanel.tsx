@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { Sparkles, Check, ArrowRight, ShieldCheck, AlertOctagon } from 'lucide-react';
-import type { InvestigationResult } from '../api/types';
+import type { DetailedInvestigationResult, StageStatus } from '../api/deployguard';
 
 interface InvestigationPanelProps {
-  onInvestigate: () => Promise<InvestigationResult>;
+  onInvestigate: (onStageUpdate: (stages: StageStatus[]) => void) => Promise<DetailedInvestigationResult>;
   onRequestRollback: () => void;
   isRolledBack: boolean;
 }
@@ -14,30 +14,28 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
   isRolledBack
 }) => {
   const [investigating, setInvestigating] = useState(false);
-  const [progressStep, setProgressStep] = useState(0);
-  const [result, setResult] = useState<InvestigationResult | null>(null);
-
-  const steps = [
-    'Checking service health',
-    'Analyzing production logs',
-    'Correlating deployment history',
-    'Inspecting Kubernetes state',
-    'Determining root cause'
-  ];
+  const [stages, setStages] = useState<StageStatus[]>([
+    { name: '1. Service Health', status: 'loading' },
+    { name: '2. Error Logs', status: 'loading' },
+    { name: '3. Deployment History', status: 'loading' },
+    { name: '4. Kubernetes State', status: 'loading' }
+  ]);
+  const [result, setResult] = useState<DetailedInvestigationResult | null>(null);
 
   const handleStart = async () => {
     setInvestigating(true);
-    setProgressStep(0);
     setResult(null);
 
-    for (let i = 0; i < steps.length; i++) {
-      await new Promise((r) => setTimeout(r, 400));
-      setProgressStep(i + 1);
+    try {
+      const res = await onInvestigate((updatedStages) => {
+        setStages([...updatedStages]);
+      });
+      setResult(res);
+    } catch {
+      // Error handling
+    } finally {
+      setInvestigating(false);
     }
-
-    const res = await onInvestigate();
-    setResult(res);
-    setInvestigating(false);
   };
 
   return (
@@ -48,7 +46,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           <h2 className="text-base font-semibold text-gray-900">AI Incident Investigation</h2>
         </div>
         <span className="text-xs text-gray-500 font-medium bg-gray-50 px-2.5 py-1 rounded border border-gray-200">
-          {result ? 'Analysis Complete' : investigating ? 'Analyzing...' : 'Investigation Ready'}
+          {result ? 'Analysis Complete' : investigating ? 'Retrieving Evidence...' : 'Investigation Ready'}
         </span>
       </div>
 
@@ -59,7 +57,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
           </div>
           <h3 className="text-sm font-medium text-gray-900">Ready to analyze production failure</h3>
           <p className="text-xs text-gray-500 max-w-md mx-auto mt-1 mb-5">
-            DeployGuard AI will inspect live service metrics, error logs, deployment history, and Kubernetes pod states to diagnose root cause.
+            DeployGuard will retrieve live service metrics, error logs, deployment records, and Kubernetes cluster telemetry to diagnose root cause.
           </p>
           <button
             onClick={handleStart}
@@ -72,35 +70,56 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
       )}
 
       {investigating && (
-        <div className="py-4 space-y-3 max-w-md mx-auto">
+        <div className="py-4 space-y-3 max-w-lg mx-auto">
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-            Investigation Progress
+            Retrieving Production Evidence Across 4 Telemetry Stages
           </div>
-          {steps.map((step, idx) => {
-            const isDone = progressStep > idx;
-            const isCurrent = progressStep === idx;
-            return (
-              <div key={idx} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50">
-                <span className={isDone ? 'text-gray-900 font-medium' : isCurrent ? 'text-blue-600 font-medium' : 'text-gray-400'}>
-                  {step}
-                </span>
-                {isDone ? (
-                  <span className="w-5 h-5 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center text-xs font-bold">
-                    ✓
-                  </span>
-                ) : isCurrent ? (
-                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                ) : (
-                  <span className="w-5 h-5 text-gray-300 flex items-center justify-center text-xs">•</span>
+          {stages.map((stage, idx) => (
+            <div key={idx} className="flex items-center justify-between text-sm py-2 px-3 bg-gray-50 border border-gray-100 rounded-md">
+              <div className="flex items-center space-x-2.5">
+                <span className="font-medium text-gray-900">{stage.name}</span>
+                {stage.details && (
+                  <span className="text-xs text-gray-500 font-mono">({stage.details})</span>
                 )}
               </div>
-            );
-          })}
+
+              {stage.status === 'success' && (
+                <span className="w-5 h-5 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">
+                  ✓
+                </span>
+              )}
+              {stage.status === 'loading' && (
+                <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+              )}
+              {stage.status === 'error' && (
+                <span className="w-5 h-5 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center text-xs font-bold">
+                  !
+                </span>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
       {result && (
         <div className="space-y-6">
+          {/* Evidence Stages Review */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            {result.stages.map((st, idx) => (
+              <div key={idx} className="bg-gray-50 border border-gray-200 rounded p-2.5">
+                <div className="flex items-center justify-between font-semibold text-gray-900 mb-1">
+                  <span>{st.name}</span>
+                  {st.status === 'success' ? (
+                    <span className="text-emerald-600 font-bold">✓</span>
+                  ) : (
+                    <span className="text-amber-600 font-bold">!</span>
+                  )}
+                </div>
+                <span className="text-[11px] text-gray-500 block truncate">{st.details || 'Retrieved'}</span>
+              </div>
+            ))}
+          </div>
+
           {/* Root Cause Section */}
           <div className="bg-gray-50 border border-gray-200 rounded-md p-4">
             <div className="flex items-center justify-between mb-2">
@@ -112,7 +131,7 @@ export const InvestigationPanel: React.FC<InvestigationPanelProps> = ({
             <p className="text-sm font-semibold text-gray-900">{result.rootCause}</p>
           </div>
 
-          {/* Evidence List */}
+          {/* Correlated Production Evidence */}
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
               Correlated Production Evidence

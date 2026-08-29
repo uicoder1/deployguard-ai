@@ -5,13 +5,17 @@ import { Investigation } from './pages/Investigation';
 import { KubernetesPage } from './pages/Kubernetes';
 import { AuditLogPage } from './pages/AuditLog';
 import { RollbackDialog } from './components/RollbackDialog';
-import { deployGuardApi } from './api/deployguard';
+import { deployGuardApi, MCP_SERVER_URL } from './api/deployguard';
+import type { DetailedInvestigationResult, StageStatus } from './api/deployguard';
 import type { ServiceStatus, RollbackResult } from './api/types';
-import { CheckCircle2, ShieldCheck, X } from 'lucide-react';
+import { CheckCircle2, ShieldCheck, X, AlertTriangle, RefreshCw, Server } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'investigation' | 'kubernetes' | 'audit'>('overview');
   const [backendConnected, setBackendConnected] = useState(false);
+  const [isSleeping, setIsSleeping] = useState(false);
+  const [isCheckingBackend, setIsCheckingBackend] = useState(false);
+
   const [status, setStatus] = useState<ServiceStatus>({
     id: 'payment-api',
     name: 'Payment Processing Service',
@@ -28,23 +32,29 @@ export const App: React.FC = () => {
   const [isRolledBack, setIsRolledBack] = useState(false);
   const [successBanner, setSuccessBanner] = useState<RollbackResult | null>(null);
 
-  const loadStatus = async () => {
-    const health = await deployGuardApi.getHealth();
-    setBackendConnected(health.server === 'deployguard-production');
+  const checkConnection = async () => {
+    setIsCheckingBackend(true);
+    const health = await deployGuardApi.checkBackendConnection();
+    setBackendConnected(health.connected);
+    setIsSleeping(health.isSleeping);
 
     const serviceStatus = await deployGuardApi.getServiceStatus('payment-api');
     setStatus(serviceStatus);
     if (serviceStatus.status === 'healthy' || serviceStatus.version === '1.8.2') {
       setIsRolledBack(true);
     }
+    setIsCheckingBackend(false);
   };
 
   useEffect(() => {
-    loadStatus();
+    checkConnection();
   }, []);
 
-  const handleInvestigate = async () => {
-    return await deployGuardApi.runInvestigation();
+  const handleInvestigate = async (
+    onStageUpdate: (stages: StageStatus[]) => void
+  ): Promise<DetailedInvestigationResult> => {
+    const res = await deployGuardApi.runInvestigation(onStageUpdate);
+    return res;
   };
 
   const handleConfirmRollback = async (): Promise<RollbackResult> => {
@@ -71,13 +81,37 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans antialiased selection:bg-blue-100 flex flex-col">
+    <div className="min-h-screen bg-gray-50 text-gray-900 font-sans antialiased flex flex-col selection:bg-blue-100">
       {/* Header Navigation */}
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         backendConnected={backendConnected}
+        isSleeping={isSleeping}
+        onRetryConnection={checkConnection}
       />
+
+      {/* Backend Sleeping / Cold-start Banner */}
+      {isSleeping && (
+        <div className="bg-amber-50 border-b border-amber-200 py-3 px-4 text-xs sm:text-sm text-amber-900">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>Backend Unavailable / Sleeping:</strong> Render free instance at <code className="font-mono">{MCP_SERVER_URL}</code> may take 30–50s to wake up. Using production simulator cache.
+              </span>
+            </div>
+            <button
+              onClick={checkConnection}
+              disabled={isCheckingBackend}
+              className="inline-flex items-center space-x-1.5 px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-semibold transition-colors disabled:opacity-50 shrink-0"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isCheckingBackend ? 'animate-spin' : ''}`} />
+              <span>{isCheckingBackend ? 'Waking backend...' : 'Retry Connection'}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -98,7 +132,7 @@ export const App: React.FC = () => {
                   <span>Healthy instances: <strong>7 / 7</strong></span>
                   <span className="flex items-center space-x-1 text-emerald-700">
                     <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Audit record created.</span>
+                    <span>Audit record created ({successBanner.auditRecord?.timestamp ? new Date(successBanner.auditRecord.timestamp).toLocaleTimeString() : 'Recorded'}).</span>
                   </span>
                 </div>
               </div>
@@ -137,11 +171,12 @@ export const App: React.FC = () => {
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 py-6 text-center text-xs text-gray-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            <strong className="text-gray-700">DeployGuard</strong> — Production Incident Investigation & Safe Remediation
+          <div className="flex items-center space-x-2">
+            <Server className="w-4 h-4 text-gray-400" />
+            <strong className="text-gray-700">DeployGuard</strong> — AI Incident Investigation &amp; Safe Remediation
           </div>
           <div className="font-mono text-gray-400">
-            DEMO_MODE=true · Streamable HTTP MCP server port 8791
+            DEMO_MODE=true · {MCP_SERVER_URL}
           </div>
         </div>
       </footer>

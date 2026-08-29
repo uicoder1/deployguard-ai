@@ -10,9 +10,13 @@ import type {
   AuditRecord
 } from './types';
 
-const API_BASE_URL = 'http://127.0.0.1:8791/api';
+// Centralized backend MCP server URL configuration
+export const MCP_SERVER_URL =
+  import.meta.env.VITE_MCP_SERVER_URL || 'https://deployguard-mcp.onrender.com';
 
-// Deterministic in-memory fallback state if backend is offline
+const API_BASE_URL = `${MCP_SERVER_URL.replace(/\/$/, '')}/api`;
+
+// Deterministic in-memory fallback state if backend is offline or sleeping
 let fallbackServiceStatus: ServiceStatus = {
   id: 'payment-api',
   name: 'Payment Processing Service',
@@ -27,21 +31,54 @@ let fallbackServiceStatus: ServiceStatus = {
 
 let fallbackAudits: AuditRecord[] = [];
 
+export interface StageStatus {
+  name: string;
+  status: 'loading' | 'success' | 'error';
+  details?: string;
+}
+
+export interface DetailedInvestigationResult extends InvestigationResult {
+  stages: StageStatus[];
+}
+
 export const deployGuardApi = {
-  async getHealth(): Promise<{ status: string; server: string }> {
+  /**
+   * Check backend connection health and Render service wake-up status.
+   */
+  async checkBackendConnection(): Promise<{
+    connected: boolean;
+    isSleeping: boolean;
+    server: string;
+  }> {
     try {
-      const res = await fetch(`${API_BASE_URL}/health`);
-      if (res.ok) return await res.json();
-    } catch {}
-    return { status: 'ok', server: 'deployguard-demo-simulator' };
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+      const res = await fetch(`${API_BASE_URL}/health`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        return { connected: true, isSleeping: false, server: data.server || 'deployguard-production' };
+      }
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        return { connected: false, isSleeping: true, server: 'render-sleeping' };
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        return { connected: false, isSleeping: true, server: 'render-timeout' };
+      }
+    }
+    return { connected: false, isSleeping: false, server: 'demo-simulator' };
   },
 
   async getServiceStatus(serviceId: string = 'payment-api'): Promise<ServiceStatus> {
     try {
       const res = await fetch(`${API_BASE_URL}/services/${serviceId}`);
       if (res.ok) {
-        const data = await res.json();
-        return data;
+        return await res.json();
       }
     } catch {}
     return fallbackServiceStatus;
@@ -144,33 +181,75 @@ export const deployGuardApi = {
   },
 
   /**
-   * Dynamically retrieves backend service telemetry, error logs, deployment records,
-   * deployment metadata, and Kubernetes state to construct the AI investigation.
+   * Executes four explicit evidence retrieval stages (Service Health, Error Logs, Deployment History, Kubernetes State)
+   * with loading, success, and error feedback for each stage.
    */
-  async runInvestigation(): Promise<InvestigationResult> {
-    const [status, logs, deployments, depDetails, k8sDep, k8sPods, k8sLogs, k8sEvents] = await Promise.all([
-      this.getServiceStatus('payment-api'),
-      this.getServiceLogs('payment-api', 'ERROR', 10),
-      this.getRecentDeployments('payment-api'),
-      this.getDeploymentDetails('184'),
-      this.getKubernetesDeployment('payment-api'),
-      this.getKubernetesPods(),
-      this.getKubernetesPodLogs(),
-      this.getKubernetesEvents()
-    ]);
+  async runInvestigation(
+    onStageUpdate?: (stages: StageStatus[]) => void
+  ): Promise<DetailedInvestigationResult> {
+    const stages: StageStatus[] = [
+      { name: '1. Service Health', status: 'loading' },
+      { name: '2. Error Logs', status: 'loading' },
+      { name: '3. Deployment History', status: 'loading' },
+      { name: '4. Kubernetes State', status: 'loading' }
+    ];
+
+    if (onStageUpdate) onStageUpdate([...stages]);
+
+    // Stage 1: Service Health
+    let status: ServiceStatus | null = null;
+    try {
+      status = await this.getServiceStatus('payment-api');
+      stages[0] = { name: '1. Service Health', status: 'success', details: `${status.status.toUpperCase()} (${status.errorRatePercent}% error rate)` };
+    } catch {
+      stages[0] = { name: '1. Service Health', status: 'error', details: 'Using cached status' };
+    }
+    if (onStageUpdate) onStageUpdate([...stages]);
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Stage 2: Error Logs
+    let logs: LogEntry[] = [];
+    try {
+      logs = await this.getServiceLogs('payment-api', 'ERROR', 10);
+      stages[1] = { name: '2. Error Logs', status: 'success', details: `${logs.length} error entries correlated` };
+    } catch {
+      stages[1] = { name: '2. Error Logs', status: 'error', details: 'Using local log stream' };
+    }
+    if (onStageUpdate) onStageUpdate([...stages]);
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Stage 3: Deployment History
+    let deployments: Deployment[] = [];
+    let depDetails: Deployment | null = null;
+    try {
+      deployments = await this.getRecentDeployments('payment-api');
+      depDetails = await this.getDeploymentDetails('184');
+      stages[2] = { name: '3. Deployment History', status: 'success', details: `Deployment #${depDetails?.id || '184'} (${depDetails?.version || 'v1.8.3'}) identified` };
+    } catch {
+      stages[2] = { name: '3. Deployment History', status: 'error', details: 'Using cached deployments' };
+    }
+    if (onStageUpdate) onStageUpdate([...stages]);
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Stage 4: Kubernetes State
+    let k8sPods: KubernetesPod[] | null = null;
+    let k8sEvents: KubernetesEvent[] | null = null;
+    try {
+      k8sPods = await this.getKubernetesPods();
+      k8sEvents = await this.getKubernetesEvents();
+      stages[3] = { name: '4. Kubernetes State', status: 'success', details: `${k8sPods?.length || 1} pods, ${k8sEvents?.length || 2} cluster events` };
+    } catch {
+      stages[3] = { name: '4. Kubernetes State', status: 'error', details: 'Using cluster telemetry cache' };
+    }
+    if (onStageUpdate) onStageUpdate([...stages]);
 
     const activeDep = deployments.find((d) => d.id === '184') || depDetails;
-    const errorCount = logs.length;
-    const podCount = k8sPods ? k8sPods.length : 1;
-    const eventCount = k8sEvents ? k8sEvents.length : 2;
-    const logSnippet = k8sLogs ? k8sLogs.split('\n').filter(Boolean).pop() || '' : '';
-
     const evidence: string[] = [
       `Connection pool reached 48/50 active connections shortly after deployment #${activeDep?.id || '184'} (${activeDep?.version || 'v1.8.3'})`,
-      `Database connection timeouts followed across ${errorCount} retrieved log entries`,
+      `Database connection timeouts followed across ${logs.length || 5} retrieved error log entries`,
       `Pool exhaustion caused payment failures (Error rate: ${status?.errorRatePercent || 47.2}%, Latency: ${status?.averageLatencyMs || 1840}ms)`,
-      `Multiple pods failed health checks (${status?.unhealthyInstances || 5} unhealthy instances reported across ${podCount} active pods)`,
-      `Kubernetes log stream (${eventCount} cluster events) confirms failures on deployment ${k8sDep?.name || 'payment-api'}: ${logSnippet || 'Liveness probe failure'}`
+      `Multiple pods failed health checks (${status?.unhealthyInstances || 5} unhealthy instances reported across ${k8sPods?.length || 7} pods)`,
+      `Incident started shortly after deployment #${activeDep?.id || '184'} (commit ${activeDep?.commitHash || 'a1b2c3d4'} by ${activeDep?.deployedBy || 'alex.chen'})`
     ];
 
     return {
@@ -185,7 +264,8 @@ export const deployGuardApi = {
         toVersion: 'v1.8.2',
         risk: 'HIGH',
         reason: `The ${activeDep?.version || 'v1.8.3'} connection pool optimization correlates directly with the production failure.`
-      }
+      },
+      stages
     };
   },
 

@@ -3,11 +3,12 @@ import { MetricCard } from '../components/MetricCard';
 import { IncidentCard } from '../components/IncidentCard';
 import { InvestigationPanel } from '../components/InvestigationPanel';
 import { StatusBadge } from '../components/StatusBadge';
-import type { ServiceStatus, InvestigationResult } from '../api/types';
+import type { ServiceStatus } from '../api/types';
+import type { DetailedInvestigationResult, StageStatus } from '../api/deployguard';
 
 interface OverviewProps {
   status: ServiceStatus;
-  onInvestigate: () => Promise<InvestigationResult>;
+  onInvestigate: (onStageUpdate: (stages: StageStatus[]) => void) => Promise<DetailedInvestigationResult>;
   onRequestRollback: () => void;
   isRolledBack: boolean;
 }
