@@ -1,26 +1,56 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
+
 import { simulator } from 'deployguard-simulator';
 
+import {
+  getKubernetesDeployment,
+  getKubernetesPods,
+  getKubernetesPodLogs,
+  getKubernetesEvents
+} from './kubernetes.js';
+
+
+/**
+ * Create the DeployGuard MCP server.
+ *
+ * DeployGuard currently exposes two kinds of tools:
+ *
+ * 1. Simulator tools
+ *    - Safe, deterministic incident-response demonstration
+ *
+ * 2. Kubernetes tools
+ *    - Read real resources from the local Kubernetes cluster
+ *    - No production mutation is performed by these tools
+ */
 export function createServerInstance(): McpServer {
   const server = new McpServer({
     name: 'deployguard-production',
     version: '1.0.0'
   });
 
+
+  // ============================================================
+  // SIMULATOR TOOLS
+  // ============================================================
+
   // 1. get_service_status
   server.tool(
     'get_service_status',
     'Get the current health and operational metrics for a service.',
     {
-      serviceId: z.string().describe('The ID of the target service, e.g. payment-api')
+      serviceId: z
+        .string()
+        .describe('The ID of the target service, e.g. payment-api')
     },
     async ({ serviceId }) => {
       const status = simulator.getServiceStatus(serviceId);
+
       if (!status) {
         return {
           isError: true,
@@ -32,6 +62,7 @@ export function createServerInstance(): McpServer {
           ]
         };
       }
+
       return {
         content: [
           {
@@ -43,14 +74,26 @@ export function createServerInstance(): McpServer {
     }
   );
 
+
   // 2. get_service_logs
   server.tool(
     'get_service_logs',
     'Get recent log entries for a service with optional log level and limit filters.',
     {
-      serviceId: z.string().describe('The ID of the target service, e.g. payment-api'),
-      level: z.enum(['INFO', 'WARN', 'ERROR', 'FATAL']).optional().describe('Filter logs by severity level'),
-      limit: z.number().optional().default(20).describe('Maximum number of log entries to retrieve (default: 20)')
+      serviceId: z
+        .string()
+        .describe('The ID of the target service, e.g. payment-api'),
+
+      level: z
+        .enum(['INFO', 'WARN', 'ERROR', 'FATAL'])
+        .optional()
+        .describe('Filter logs by severity level'),
+
+      limit: z
+        .number()
+        .optional()
+        .default(20)
+        .describe('Maximum number of log entries to retrieve (default: 20)')
     },
     async ({ serviceId, level, limit }) => {
       const logs = simulator.getLogs({
@@ -58,6 +101,7 @@ export function createServerInstance(): McpServer {
         level,
         limit: limit ?? 20
       });
+
       return {
         content: [
           {
@@ -69,15 +113,20 @@ export function createServerInstance(): McpServer {
     }
   );
 
+
   // 3. get_recent_deployments
   server.tool(
     'get_recent_deployments',
     'Get recent deployment records, optionally filtered by service ID.',
     {
-      serviceId: z.string().optional().describe('Optional service ID to filter deployment history')
+      serviceId: z
+        .string()
+        .optional()
+        .describe('Optional service ID to filter deployment history')
     },
     async ({ serviceId }) => {
       const deployments = simulator.getRecentDeployments(serviceId);
+
       return {
         content: [
           {
@@ -89,15 +138,19 @@ export function createServerInstance(): McpServer {
     }
   );
 
+
   // 4. get_deployment_details
   server.tool(
     'get_deployment_details',
     'Get detailed metadata and status for a specific deployment ID.',
     {
-      deploymentId: z.string().describe('The deployment ID to query, e.g. 184')
+      deploymentId: z
+        .string()
+        .describe('The deployment ID to query, e.g. 184')
     },
     async ({ deploymentId }) => {
       const deployment = simulator.getDeploymentDetails(deploymentId);
+
       if (!deployment) {
         return {
           isError: true,
@@ -109,6 +162,7 @@ export function createServerInstance(): McpServer {
           ]
         };
       }
+
       return {
         content: [
           {
@@ -120,26 +174,37 @@ export function createServerInstance(): McpServer {
     }
   );
 
+
   // 5. rollback_deployment
+  //
+  // IMPORTANT:
+  // This is still the safe simulator rollback.
+  // We are NOT allowing an AI agent to directly mutate Kubernetes yet.
   server.tool(
     'rollback_deployment',
     'Safely simulate rolling back a service deployment to the previous successful version. This only modifies the local DeployGuard production simulator.',
     {
-      deploymentId: z.string().describe('The deployment ID to roll back, e.g. 184')
+      deploymentId: z
+        .string()
+        .describe('The deployment ID to roll back, e.g. 184')
     },
     async ({ deploymentId }) => {
       const result = simulator.rollbackDeployment(deploymentId);
+
       if (!result.success) {
         return {
           isError: true,
           content: [
             {
               type: 'text',
-              text: result.error || `Error rolling back deployment '${deploymentId}'.`
+              text:
+                result.error ||
+                `Error rolling back deployment '${deploymentId}'.`
             }
           ]
         };
       }
+
       return {
         content: [
           {
@@ -164,86 +229,437 @@ export function createServerInstance(): McpServer {
     }
   );
 
+
+  // ============================================================
+  // REAL KUBERNETES READ-ONLY TOOLS
+  // ============================================================
+
+  // 6. get_k8s_deployment
+  server.tool(
+    'get_k8s_deployment',
+    'Inspect a real Kubernetes deployment including replica health, container images, environment variables, readiness probes, and deployment conditions.',
+    {
+      name: z
+        .string()
+        .describe('Kubernetes deployment name, e.g. payment-api'),
+
+      namespace: z
+        .string()
+        .optional()
+        .default('default')
+        .describe('Kubernetes namespace')
+    },
+    async ({ name, namespace }) => {
+      try {
+        const deployment = await getKubernetesDeployment(
+          name,
+          namespace ?? 'default'
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(deployment, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                `Kubernetes deployment lookup failed for ` +
+                `'${name}': ${String(error)}`
+            }
+          ]
+        };
+      }
+    }
+  );
+
+
+  // 7. get_k8s_pods
+  server.tool(
+    'get_k8s_pods',
+    'Inspect real Kubernetes pods including readiness, restart counts, phases, node placement, container states, and health conditions.',
+    {
+      namespace: z
+        .string()
+        .optional()
+        .default('default')
+        .describe('Kubernetes namespace'),
+
+      labelSelector: z
+        .string()
+        .optional()
+        .describe(
+          'Optional Kubernetes label selector, e.g. app=payment-api'
+        )
+    },
+    async ({ namespace, labelSelector }) => {
+      try {
+        const pods = await getKubernetesPods(
+          namespace ?? 'default',
+          labelSelector
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(pods, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                `Kubernetes pod lookup failed: ${String(error)}`
+            }
+          ]
+        };
+      }
+    }
+  );
+
+
+  // 8. get_k8s_logs
+  server.tool(
+    'get_k8s_logs',
+    'Retrieve logs from a real Kubernetes pod for incident investigation.',
+    {
+      podName: z
+        .string()
+        .describe('Kubernetes pod name'),
+
+      namespace: z
+        .string()
+        .optional()
+        .default('default')
+        .describe('Kubernetes namespace'),
+
+      container: z
+        .string()
+        .optional()
+        .describe('Optional container name')
+    },
+    async ({ podName, namespace, container }) => {
+      try {
+        const logs = await getKubernetesPodLogs(
+          podName,
+          namespace ?? 'default',
+          container
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: logs
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                `Kubernetes pod log retrieval failed for ` +
+                `'${podName}': ${String(error)}`
+            }
+          ]
+        };
+      }
+    }
+  );
+
+
+  // 9. get_k8s_events
+  server.tool(
+    'get_k8s_events',
+    'Inspect recent Kubernetes events to identify scheduling, image, readiness, deployment, and pod failures.',
+    {
+      namespace: z
+        .string()
+        .optional()
+        .default('default')
+        .describe('Kubernetes namespace')
+    },
+    async ({ namespace }) => {
+      try {
+        const events = await getKubernetesEvents(
+          namespace ?? 'default'
+        );
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(events, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text:
+                `Kubernetes event lookup failed: ${String(error)}`
+            }
+          ]
+        };
+      }
+    }
+  );
+
+
   return server;
 }
 
-export const transports = new Map<string, StreamableHTTPServerTransport>();
 
-export const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-  const host = req.headers.host || '127.0.0.1:8791';
-  const url = new URL(req.url || '/', `http://${host}`);
+// ============================================================
+// STREAMABLE HTTP TRANSPORT
+// ============================================================
 
-  if (url.pathname === '/health' && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', server: 'deployguard-production' }));
-    return;
-  }
+export const transports = new Map<
+  string,
+  StreamableHTTPServerTransport
+>();
 
-  if (url.pathname === '/mcp') {
-    const sessionId = (req.headers['mcp-session-id'] || req.headers['Mcp-Session-Id']) as string | undefined;
 
-    if (sessionId) {
-      const transport = transports.get(sessionId);
-      if (!transport) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message: 'Session not found' }, id: null }));
+export const httpServer = createServer(
+  async (
+    req: IncomingMessage,
+    res: ServerResponse
+  ) => {
+    const host =
+      req.headers.host || '127.0.0.1:8791';
+
+    const url = new URL(
+      req.url || '/',
+      `http://${host}`
+    );
+
+
+    // ----------------------------------------------------------
+    // Health endpoint
+    // ----------------------------------------------------------
+
+    if (
+      url.pathname === '/health' &&
+      req.method === 'GET'
+    ) {
+      res.writeHead(200, {
+        'Content-Type': 'application/json'
+      });
+
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          server: 'deployguard-production'
+        })
+      );
+
+      return;
+    }
+
+
+    // ----------------------------------------------------------
+    // MCP endpoint
+    // ----------------------------------------------------------
+
+    if (url.pathname === '/mcp') {
+      const sessionId =
+        (req.headers['mcp-session-id'] ||
+          req.headers['Mcp-Session-Id']) as
+          | string
+          | undefined;
+
+
+      // Existing MCP session
+      if (sessionId) {
+        const transport =
+          transports.get(sessionId);
+
+        if (!transport) {
+          res.writeHead(404, {
+            'Content-Type': 'application/json'
+          });
+
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32001,
+                message: 'Session not found'
+              },
+              id: null
+            })
+          );
+
+          return;
+        }
+
+
+        try {
+          await transport.handleRequest(
+            req,
+            res
+          );
+        } catch (err) {
+          console.error(
+            'MCP handleRequest error:',
+            err
+          );
+
+          if (!res.headersSent) {
+            res.writeHead(500, {
+              'Content-Type': 'application/json'
+            });
+
+            res.end(
+              JSON.stringify({
+                error: String(err)
+              })
+            );
+          }
+        }
+
         return;
       }
-      try {
-        await transport.handleRequest(req, res);
-      } catch (err) {
-        console.error('MCP handleRequest error:', err);
-        if (!res.headersSent) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: String(err) }));
-        }
-      }
-      return;
-    }
 
-    if (req.method === 'POST') {
-      try {
-        const sessionServer = createServerInstance();
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (id) => {
-            transports.set(id, transport);
-          },
-          onsessionclosed: (id) => {
-            transports.delete(id);
-            sessionServer.close().catch(() => {});
+
+      // New MCP session
+      if (req.method === 'POST') {
+        try {
+          const sessionServer =
+            createServerInstance();
+
+          const transport =
+            new StreamableHTTPServerTransport({
+              sessionIdGenerator: () =>
+                randomUUID(),
+
+              onsessioninitialized: (id) => {
+                transports.set(
+                  id,
+                  transport
+                );
+              },
+
+              onsessionclosed: (id) => {
+                transports.delete(id);
+
+                sessionServer
+                  .close()
+                  .catch(() => {});
+              }
+            });
+
+
+          await sessionServer.connect(
+            transport
+          );
+
+          await transport.handleRequest(
+            req,
+            res
+          );
+        } catch (err) {
+          console.error(
+            'MCP initialize handleRequest error:',
+            err
+          );
+
+          if (!res.headersSent) {
+            res.writeHead(500, {
+              'Content-Type': 'application/json'
+            });
+
+            res.end(
+              JSON.stringify({
+                error: String(err)
+              })
+            );
           }
-        });
-
-        await sessionServer.connect(transport);
-        await transport.handleRequest(req, res);
-      } catch (err) {
-        console.error('MCP initialize handleRequest error:', err);
-        if (!res.headersSent) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: String(err) }));
         }
+
+        return;
       }
+
+
+      // Invalid MCP request
+      res.writeHead(400, {
+        'Content-Type': 'application/json'
+      });
+
+      res.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: {
+            code: -32600,
+            message:
+              'Bad Request: Non-initialize request missing mcp-session-id header'
+          },
+          id: null
+        })
+      );
+
       return;
     }
 
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32600, message: 'Bad Request: Non-initialize request missing mcp-session-id header' }, id: null }));
-    return;
-  }
 
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not Found' }));
-});
+    // ----------------------------------------------------------
+    // Unknown endpoint
+    // ----------------------------------------------------------
 
-export async function startServer(port = 8791, host = '0.0.0.0'): Promise<void> {
-  return new Promise((resolve) => {
-    httpServer.listen(port, host, () => {
-      console.error(`DeployGuard MCP Streamable HTTP Server running on http://${host}:${port}/mcp`);
-      resolve();
+    res.writeHead(404, {
+      'Content-Type': 'application/json'
     });
+
+    res.end(
+      JSON.stringify({
+        error: 'Not Found'
+      })
+    );
+  }
+);
+
+
+// ============================================================
+// SERVER LIFECYCLE
+// ============================================================
+
+export async function startServer(
+  port = 8791,
+  host = '0.0.0.0'
+): Promise<void> {
+  return new Promise((resolve) => {
+    httpServer.listen(
+      port,
+      host,
+      () => {
+        console.error(
+          `DeployGuard MCP Streamable HTTP Server running on http://${host}:${port}/mcp`
+        );
+
+        resolve();
+      }
+    );
   });
 }
+
 
 export async function stopServer(): Promise<void> {
   for (const transport of transports.values()) {
@@ -251,32 +667,58 @@ export async function stopServer(): Promise<void> {
       await transport.close();
     } catch {}
   }
+
   transports.clear();
 
+
   if (httpServer.listening) {
-    if (typeof httpServer.closeAllConnections === 'function') {
+    if (
+      typeof httpServer.closeAllConnections ===
+      'function'
+    ) {
       httpServer.closeAllConnections();
     }
+
     await new Promise<void>((resolve) => {
-      httpServer.close(() => resolve());
+      httpServer.close(() =>
+        resolve()
+      );
     });
   }
 }
 
+
+// ============================================================
+// MAIN ENTRY POINT
+// ============================================================
+
 function isExecutedAsMain(): boolean {
-  if (!process.argv[1]) return false;
+  if (!process.argv[1]) {
+    return false;
+  }
+
   try {
-    const currentFilePath = fileURLToPath(import.meta.url);
-    const argvPath = process.argv[1];
-    return argvPath === currentFilePath;
+    const currentFilePath =
+      fileURLToPath(import.meta.url);
+
+    const argvPath =
+      process.argv[1];
+
+    return argvPath === argvPath &&
+      argvPath === currentFilePath;
   } catch {
     return false;
   }
 }
 
+
 if (isExecutedAsMain()) {
   startServer().catch((err) => {
-    console.error('Fatal error starting DeployGuard MCP Server:', err);
+    console.error(
+      'Fatal error starting DeployGuard MCP Server:',
+      err
+    );
+
     process.exit(1);
   });
 }

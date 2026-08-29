@@ -24,12 +24,12 @@ describe('DeployGuard Production MCP Streamable HTTP Integration Tests', () => {
     if (client) {
       try {
         await client.close();
-      } catch {}
+      } catch { }
     }
     if (clientTransport) {
       try {
         await clientTransport.close();
-      } catch {}
+      } catch { }
     }
     await stopServer();
   });
@@ -60,14 +60,20 @@ describe('DeployGuard Production MCP Streamable HTTP Integration Tests', () => {
     assert.ok(client, 'MCP Client connected over Streamable HTTP transport');
   });
 
-  it('5. MCP tool listing contains exactly the five tools', async () => {
+  it('5. MCP tool listing contains all nine tools', async () => {
     const toolsResult = await client.listTools();
+
     assert.ok(toolsResult.tools, 'Tools list should exist');
-    assert.equal(toolsResult.tools.length, 5);
+    assert.equal(toolsResult.tools.length, 9);
 
     const toolNames = toolsResult.tools.map(t => t.name).sort();
+
     assert.deepEqual(toolNames, [
       'get_deployment_details',
+      'get_k8s_deployment',
+      'get_k8s_events',
+      'get_k8s_logs',
+      'get_k8s_pods',
       'get_recent_deployments',
       'get_service_logs',
       'get_service_status',
@@ -161,7 +167,7 @@ describe('DeployGuard Production MCP Streamable HTTP Integration Tests', () => {
 
     const toolsResult = await client2.listTools();
     assert.ok(toolsResult.tools);
-    assert.equal(toolsResult.tools.length, 5);
+    assert.equal(toolsResult.tools.length, 9);
 
     await client2.close();
     await clientTransport2.close();

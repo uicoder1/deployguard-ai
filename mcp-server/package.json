@@ -12,6 +12,7 @@
     "test": "node --import tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
+    "@kubernetes/client-node": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "deployguard-simulator": "file:../simulator",
     "zod": "^3.23.8"
