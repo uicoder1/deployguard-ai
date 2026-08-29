@@ -8,88 +8,106 @@ Built for **The Agent Harness Hackathon**.
 
 ## 🚀 Overview
 
-**DeployGuard** is an intelligent AI incident response agent designed to automatically triage, diagnose, and resolve software production incidents safely and efficiently. Powered by TrueFoundry's **TrueForge** agent harness and Google's **Gemini** models, DeployGuard acts as a virtual site reliability engineer (SRE) equipped with human-in-the-loop guardrails.
+**DeployGuard** is an AI-powered production incident response agent designed to investigate, diagnose, and safely remediate software production incidents.
+
+It acts like a virtual Site Reliability Engineer (SRE). When a production service enters a degraded or critical state, DeployGuard uses structured MCP tools to collect service metrics, application logs, deployment history, and Kubernetes state.
+
+The agent correlates this evidence to identify a likely root cause and recommends a remediation.
+
+For potentially destructive actions such as a deployment rollback, DeployGuard requires **explicit human approval before execution**.
+
+DeployGuard is powered by:
+
+- **TrueForge** for agent orchestration and tool execution
+- **Gemini** for AI reasoning
+- **Model Context Protocol (MCP)** for structured access to production tools
+- A simulated production environment for safe incident-response testing
+- A web dashboard for incident visibility, remediation, and audit history
 
 ---
 
 ## 🎯 Problem Statement
 
-Modern cloud infrastructure and microservices produce complex telemetry during outages or degraded states. SRE and DevOps teams face:
-- High Mean Time to Resolution (MTTR) due to manual log inspection and metrics analysis.
-- Risk of human error or unintended escalation during high-stress outages.
-- Lack of standardized, safe execution sandboxes for automated remediation actions.
+Modern cloud infrastructure and microservices generate large amounts of telemetry during outages and degraded states.
 
-**DeployGuard** addresses these challenges by orchestrating autonomous investigation workflows using structured tools (MCP), isolated sandbox testing, and mandatory human approval gates before executing critical remediations.
+During an incident, engineers often need to manually correlate:
+
+- Service health metrics
+- Application error logs
+- Recent deployments
+- Kubernetes workload state
+- Deployment changes
+- Recovery status
+
+This increases Mean Time to Resolution (MTTR) and creates opportunities for human error, especially during high-pressure production incidents.
+
+DeployGuard addresses this problem by providing an agent that can:
+
+1. Detect and investigate a production incident
+2. Collect evidence from multiple structured tools
+3. Correlate the evidence
+4. Identify a likely root cause
+5. Recommend a remediation
+6. Pause for human approval before performing a critical action
+7. Execute the approved remediation through a tool
+8. Verify the resulting service state
+9. Record the remediation in an audit trail
 
 ---
 
-## 🏗️ Project Architecture
+# 🏗️ Architecture
 
 ```text
-User
-  ↓
-DeployGuard Agent
-  ↓
-TrueForge
-  ├── Gemini model
-  ├── MCP tools
-  ├── Sandbox
-  └── Human approval
-       ↓
-Production Simulator
-```
-
-For detailed architectural notes, see [`docs/architecture.md`](docs/architecture.md).
-
----
-
-## 🛠️ Model Context Protocol (MCP) Tools
-
-DeployGuard exposes 5 structured tools via its Streamable HTTP MCP server:
-
-1. **`get_service_status`**: Retrieve operational metrics and health status for microservices.
-2. **`get_service_logs`**: Retrieve recent log entries with severity filtering.
-3. **`get_recent_deployments`**: Retrieve recent deployment records.
-4. **`get_deployment_details`**: Retrieve metadata for a specific deployment ID.
-5. **`rollback_deployment`**: Safely simulate rolling back a service deployment to the previous successful version.
-
----
-
-## 🤖 Agent Operating Instructions & Human-in-the-Loop Policy
-
-- **Autonomous Investigation**: The agent automatically queries telemetry tools to triage and diagnose root causes.
-- **Human Approval Gate**: Remediation via `rollback_deployment` is **NEVER** executed automatically. The agent must explicitly ask the user for approval, explaining:
-  - Affected service name & ID
-  - Target deployment ID
-  - Current version & rollback target version
-  - Root cause reason
-  - Risk assessment
-- **Safety Guarantee**: `rollback_deployment` only mutates the in-memory `ProductionSimulator` state and does not execute real shell commands, Kubernetes, Docker, or cloud API calls.
-- **Verification**: Following a approved rollback, the agent executes `get_service_status` to verify that the service state has been restored to healthy.
-
----
-
-## 📁 Repository Structure
-
-```text
-deployguard-ai/
-├── README.md
-├── .gitignore
-├── LICENSE
-├── docs/
-│   └── architecture.md
-├── simulator/
-├── mcp-server/
-└── frontend/
-```
-
-- **`docs/`**: Architecture documentation and design specifications.
-- **`simulator/`**: Isolated production environment simulator for incident scenarios.
-- **`mcp-server/`**: Model Context Protocol (MCP) server providing tools and system metrics to the agent.
-- **`frontend/`**: Web user interface for monitoring incidents, viewing execution traces, and approving agent actions.
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+                         User
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │   TrueForge     │
+                  │   Agent Harness │
+                  └────────┬────────┘
+                           │
+                    Gemini Reasoning
+                           │
+                           ▼
+                  ┌─────────────────┐
+                  │   MCP Server    │
+                  │   DeployGuard   │
+                  └────────┬────────┘
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+             ▼             ▼             ▼
+       Service Status   Logs       Deployments
+             │             │             │
+             └─────────────┼─────────────┘
+                           │
+                           ▼
+                   Kubernetes State
+                           │
+                           ▼
+                  Evidence Correlation
+                           │
+                           ▼
+                   Root Cause Analysis
+                           │
+                           ▼
+                 Remediation Recommendation
+                           │
+                           ▼
+                  ┌──────────────────┐
+                  │ HUMAN APPROVAL   │
+                  └────────┬─────────┘
+                           │
+                    Approved?
+                           │
+                           ▼
+                  rollback_deployment
+                           │
+                           ▼
+                  Production Simulator
+                           │
+                           ▼
+                  Recovery Verification
+                           │
+                           ▼
+                     Audit Record
