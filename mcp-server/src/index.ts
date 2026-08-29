@@ -453,6 +453,229 @@ export const httpServer = createServer(
 
 
     // ----------------------------------------------------------
+    // CORS headers for browser dashboard
+    // ----------------------------------------------------------
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader(
+      'Access-Control-Allow-Methods',
+      'GET, POST, OPTIONS, DELETE, PUT'
+    );
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Accept, mcp-session-id, Mcp-Session-Id'
+    );
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    // ----------------------------------------------------------
+    // API Adapter routes for frontend dashboard
+    // ----------------------------------------------------------
+
+    if (url.pathname.startsWith('/api/')) {
+      res.setHeader('Content-Type', 'application/json');
+
+      if (url.pathname === '/api/health' && req.method === 'GET') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ status: 'ok', server: 'deployguard-production' }));
+        return;
+      }
+
+      if (url.pathname === '/api/audits' && req.method === 'GET') {
+        const audits = simulator.getRollbackAudits();
+        res.writeHead(200);
+        res.end(JSON.stringify(audits));
+        return;
+      }
+
+      if (url.pathname === '/api/investigate' && req.method === 'POST') {
+        res.writeHead(200);
+        res.end(
+          JSON.stringify({
+            rootCause:
+              'Deployment #184 (v1.8.3) introduced database connection pool exhaustion.',
+            confidence: 'CONFIRMED',
+            evidence: [
+              'Connection pool reached 48/50 active connections',
+              'Database connection timeouts followed',
+              'Pool exhaustion caused payment failures',
+              'Multiple pods failed health checks',
+              'Incident started shortly after deployment #184'
+            ],
+            recommendation: {
+              action: 'Rollback deployment #184',
+              serviceId: 'payment-api',
+              deploymentId: '184',
+              fromVersion: 'v1.8.3',
+              toVersion: 'v1.8.2',
+              risk: 'HIGH',
+              reason:
+                'The v1.8.3 connection pool optimization correlates with the production failure.'
+            }
+          })
+        );
+        return;
+      }
+
+      if (url.pathname === '/api/rollback' && req.method === 'POST') {
+        let bodyText = '';
+        try {
+          bodyText = await new Promise<string>((resolve, reject) => {
+            let data = '';
+            req.on('data', (chunk) => { data += chunk; });
+            req.on('end', () => resolve(data));
+            req.on('error', (err) => reject(err));
+          });
+        } catch {}
+
+        let deploymentId = '184';
+        if (bodyText) {
+          try {
+            const parsed = JSON.parse(bodyText);
+            if (parsed.deploymentId) deploymentId = parsed.deploymentId;
+          } catch {}
+        }
+
+        const result = simulator.rollbackDeployment(deploymentId);
+        if (!result.success) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ error: result.error }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+        return;
+      }
+
+      // GET /api/services/:serviceId/logs
+      const serviceLogsMatch = url.pathname.match(/^\/api\/services\/([^/]+)\/logs$/);
+      if (serviceLogsMatch && req.method === 'GET') {
+        const serviceId = serviceLogsMatch[1];
+        const level = url.searchParams.get('level') as any;
+        const limitStr = url.searchParams.get('limit');
+        const limit = limitStr ? parseInt(limitStr, 10) : 20;
+
+        const logs = simulator.getLogs({ serviceId, level, limit });
+        res.writeHead(200);
+        res.end(JSON.stringify(logs));
+        return;
+      }
+
+      // GET /api/services/:serviceId
+      const serviceMatch = url.pathname.match(/^\/api\/services\/([^/]+)$/);
+      if (serviceMatch && req.method === 'GET') {
+        const serviceId = serviceMatch[1];
+        const status = simulator.getServiceStatus(serviceId);
+        if (!status) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Service '${serviceId}' not found` }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify(status));
+        return;
+      }
+
+      // GET /api/deployments/details/:id or /api/deployments/:id_or_service
+      const detailsMatch = url.pathname.match(/^\/api\/deployments\/details\/([^/]+)$/);
+      if (detailsMatch && req.method === 'GET') {
+        const id = detailsMatch[1];
+        const dep = simulator.getDeploymentDetails(id);
+        if (!dep) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Deployment '${id}' not found` }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify(dep));
+        return;
+      }
+
+      const depMatch = url.pathname.match(/^\/api\/deployments\/([^/]+)$/);
+      if (depMatch && req.method === 'GET') {
+        const param = depMatch[1];
+        // If param is a numeric deployment ID like '184' or '183'
+        const depById = simulator.getDeploymentDetails(param);
+        if (depById) {
+          res.writeHead(200);
+          res.end(JSON.stringify(depById));
+          return;
+        }
+        // Otherwise treat as serviceId (e.g. 'payment-api')
+        const deps = simulator.getRecentDeployments(param);
+        res.writeHead(200);
+        res.end(JSON.stringify(deps));
+        return;
+      }
+
+      // Kubernetes REST endpoints
+      const k8sDepMatch = url.pathname.match(/^\/api\/kubernetes\/deployment\/([^/]+)$/);
+      if (k8sDepMatch && req.method === 'GET') {
+        const name = k8sDepMatch[1];
+        const namespace = url.searchParams.get('namespace') || 'default';
+        try {
+          const dep = await getKubernetesDeployment(name, namespace);
+          res.writeHead(200);
+          res.end(JSON.stringify(dep));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+        return;
+      }
+
+      if (url.pathname === '/api/kubernetes/pods' && req.method === 'GET') {
+        const namespace = url.searchParams.get('namespace') || 'default';
+        const labelSelector = url.searchParams.get('labelSelector') || undefined;
+        try {
+          const pods = await getKubernetesPods(namespace, labelSelector);
+          res.writeHead(200);
+          res.end(JSON.stringify(pods));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+        return;
+      }
+
+      if (url.pathname === '/api/kubernetes/logs' && req.method === 'GET') {
+        const podName = url.searchParams.get('podName') || '';
+        const namespace = url.searchParams.get('namespace') || 'default';
+        const container = url.searchParams.get('container') || undefined;
+        try {
+          const logs = await getKubernetesPodLogs(podName, namespace, container);
+          res.writeHead(200);
+          res.end(JSON.stringify({ logs }));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+        return;
+      }
+
+      if (url.pathname === '/api/kubernetes/events' && req.method === 'GET') {
+        const namespace = url.searchParams.get('namespace') || 'default';
+        try {
+          const events = await getKubernetesEvents(namespace);
+          res.writeHead(200);
+          res.end(JSON.stringify(events));
+        } catch (err) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: String(err) }));
+        }
+        return;
+      }
+
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'API route not found' }));
+      return;
+    }
+
+    // ----------------------------------------------------------
     // Health endpoint
     // ----------------------------------------------------------
 
