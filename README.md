@@ -14,10 +14,10 @@ DeployGuard investigates production incidents, finds the likely cause, recommend
 
 - **Live Dashboard:** https://dashboard-seven-alpha-60.vercel.app/
 - **GitHub:** https://github.com/uicoder1/deployguard-ai
-- **Demo Video:** ADD_YOUR_VIDEO_LINK
+- **Demo Video:** https://youtu.be/BmNiqBAOpRc
 - **TrueForge:** https://github.com/truefoundry/trueforge
 - **Qodo Reviewed PR:** https://github.com/uicoder1/deployguard-ai/pull/2
-- **Blog Post:** ADD_YOUR_BLOG_LINK
+- **Blog Post:** https://anshuuicoder.in/tech-blogs/building-deployguard-ai-incident-response-agent
 
 ---
 
