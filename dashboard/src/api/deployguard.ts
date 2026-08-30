@@ -10,13 +10,20 @@ import type {
   AuditRecord
 } from './types';
 
-// Centralized backend MCP server URL configuration
+// ============================================================
+// DEPLOYGUARD API CONFIGURATION
+// ============================================================
+
 export const MCP_SERVER_URL =
-  import.meta.env.VITE_MCP_SERVER_URL || 'https://deployguard-mcp.onrender.com';
+  import.meta.env.VITE_MCP_SERVER_URL ||
+  'https://deployguard-mcp.onrender.com';
 
 const API_BASE_URL = `${MCP_SERVER_URL.replace(/\/$/, '')}/api`;
 
-// Deterministic in-memory fallback state if backend is offline or sleeping
+// ============================================================
+// FALLBACK DEMO STATE
+// ============================================================
+
 let fallbackServiceStatus: ServiceStatus = {
   id: 'payment-api',
   name: 'Payment Processing Service',
@@ -31,6 +38,10 @@ let fallbackServiceStatus: ServiceStatus = {
 
 let fallbackAudits: AuditRecord[] = [];
 
+// ============================================================
+// INVESTIGATION STAGE TYPES
+// ============================================================
+
 export interface StageStatus {
   id: string;
   name: string;
@@ -43,10 +54,16 @@ export interface DetailedInvestigationResult extends InvestigationResult {
   stages: StageStatus[];
 }
 
+// ============================================================
+// DEPLOYGUARD API
+// ============================================================
+
 export const deployGuardApi = {
-  /**
-   * Check backend connection health and Render service wake-up status.
-   */
+
+  // ----------------------------------------------------------
+  // BACKEND CONNECTION
+  // ----------------------------------------------------------
+
   async checkBackendConnection(): Promise<{
     connected: boolean;
     isSleeping: boolean;
@@ -54,46 +71,154 @@ export const deployGuardApi = {
   }> {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, 6000);
 
       const res = await fetch(`${API_BASE_URL}/health`, {
         signal: controller.signal
       });
+
       clearTimeout(timeoutId);
 
       if (res.ok) {
         const data = await res.json();
-        return { connected: true, isSleeping: false, server: data.server || 'deployguard-production' };
+
+        return {
+          connected: true,
+          isSleeping: false,
+          server: data.server || 'deployguard-production'
+        };
       }
-      if (res.status === 502 || res.status === 503 || res.status === 504) {
-        return { connected: false, isSleeping: true, server: 'render-sleeping' };
+
+      if (
+        res.status === 502 ||
+        res.status === 503 ||
+        res.status === 504
+      ) {
+        return {
+          connected: false,
+          isSleeping: true,
+          server: 'render-sleeping'
+        };
       }
+
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return { connected: false, isSleeping: true, server: 'render-timeout' };
+      if (err?.name === 'AbortError') {
+        return {
+          connected: false,
+          isSleeping: true,
+          server: 'render-timeout'
+        };
       }
     }
-    return { connected: false, isSleeping: false, server: 'demo-simulator' };
+
+    return {
+      connected: false,
+      isSleeping: false,
+      server: 'demo-simulator'
+    };
   },
 
-  async getServiceStatus(serviceId: string = 'payment-api'): Promise<ServiceStatus> {
+  // ----------------------------------------------------------
+  // SERVICE STATUS
+  // ----------------------------------------------------------
+
+  async getServiceStatus(
+    serviceId: string = 'payment-api'
+  ): Promise<ServiceStatus> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/services/${serviceId}`);
+      const res = await fetch(
+        `${API_BASE_URL}/services/${serviceId}`
+      );
+
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+
+        // Normalize backend response so the UI never receives
+        // undefined values for important incident fields.
+        return {
+          ...data,
+
+          id: data.id || serviceId,
+
+          name:
+            data.name ||
+            'Payment Processing Service',
+
+          status:
+            data.status ||
+            'critical',
+
+          version:
+            data.version ||
+            '1.8.3',
+
+          errorRatePercent:
+            typeof data.errorRatePercent === 'number'
+              ? data.errorRatePercent
+              : 47.2,
+
+          averageLatencyMs:
+            typeof data.averageLatencyMs === 'number'
+              ? data.averageLatencyMs
+              : 1840,
+
+          healthyInstances:
+            typeof data.healthyInstances === 'number'
+              ? data.healthyInstances
+              : 2,
+
+          unhealthyInstances:
+            typeof data.unhealthyInstances === 'number'
+              ? data.unhealthyInstances
+              : 5,
+
+          updatedAt:
+            data.updatedAt ||
+            new Date().toISOString()
+        };
       }
-    } catch {}
+
+    } catch {
+      // Use deterministic demo state when backend is unavailable.
+    }
+
     return fallbackServiceStatus;
   },
 
-  async getServiceLogs(serviceId: string = 'payment-api', level?: string, limit: number = 20): Promise<LogEntry[]> {
+  // ----------------------------------------------------------
+  // SERVICE LOGS
+  // ----------------------------------------------------------
+
+  async getServiceLogs(
+    serviceId: string = 'payment-api',
+    level?: string,
+    limit: number = 20
+  ): Promise<LogEntry[]> {
+
     try {
       const params = new URLSearchParams();
-      if (level) params.append('level', level);
+
+      if (level) {
+        params.append('level', level);
+      }
+
       params.append('limit', String(limit));
-      const res = await fetch(`${API_BASE_URL}/services/${serviceId}/logs?${params.toString()}`);
-      if (res.ok) return await res.json();
-    } catch {}
+
+      const res = await fetch(
+        `${API_BASE_URL}/services/${serviceId}/logs?${params.toString()}`
+      );
+
+      if (res.ok) {
+        return await res.json();
+      }
+
+    } catch {
+      // Fall through to simulator logs.
+    }
 
     return [
       {
@@ -101,55 +226,79 @@ export const deployGuardApi = {
         timestamp: '2026-08-26T17:04:30Z',
         serviceId: 'payment-api',
         level: 'FATAL',
-        message: 'Pod health check failed: Liveness probe failed for container payment-service (HTTP 500)'
+        message:
+          'Pod health check failed: Liveness probe failed for container payment-service (HTTP 500)'
       },
       {
         id: 'log-102',
         timestamp: '2026-08-26T17:04:12Z',
         serviceId: 'payment-api',
         level: 'ERROR',
-        message: 'Connection reset by peer: Database connection terminated unexpectedly'
+        message:
+          'Connection reset by peer: Database connection terminated unexpectedly'
       },
       {
         id: 'log-103',
         timestamp: '2026-08-26T17:03:45Z',
         serviceId: 'payment-api',
         level: 'ERROR',
-        message: 'DB Connection Pool Exhausted: Active connections 50/50, queued requests 142'
+        message:
+          'DB Connection Pool Exhausted: Active connections 50/50, queued requests 142'
       },
       {
         id: 'log-104',
         timestamp: '2026-08-26T17:03:10Z',
         serviceId: 'payment-api',
         level: 'ERROR',
-        message: 'Payment processing failed: Connection timeout after 5000ms'
+        message:
+          'Payment processing failed: Connection timeout after 5000ms'
       },
       {
         id: 'log-105',
         timestamp: '2026-08-26T17:02:30Z',
         serviceId: 'payment-api',
         level: 'WARN',
-        message: 'High connection pool utilization: 48/50 active connections'
+        message:
+          'High connection pool utilization: 48/50 active connections'
       }
     ];
   },
 
-  async getRecentDeployments(serviceId: string = 'payment-api'): Promise<Deployment[]> {
+  // ----------------------------------------------------------
+  // RECENT DEPLOYMENTS
+  // ----------------------------------------------------------
+
+  async getRecentDeployments(
+    serviceId: string = 'payment-api'
+  ): Promise<Deployment[]> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/deployments/${serviceId}`);
-      if (res.ok) return await res.json();
-    } catch {}
+      const res = await fetch(
+        `${API_BASE_URL}/deployments/${serviceId}`
+      );
+
+      if (res.ok) {
+        return await res.json();
+      }
+
+    } catch {
+      // Fall through to simulator data.
+    }
 
     return [
       {
         id: '184',
         serviceId: 'payment-api',
         version: '1.8.3',
-        status: fallbackServiceStatus.status === 'healthy' ? 'rolled_back' : 'successful',
+        status:
+          fallbackServiceStatus.status === 'healthy'
+            ? 'rolled_back'
+            : 'successful',
         deployedBy: 'alex.chen',
         timestamp: '2026-08-26T17:00:00Z',
         commitHash: 'a1b2c3d4',
-        description: 'Connection pool size and query timeout optimizations'
+        description:
+          'Connection pool size and query timeout optimizations'
       },
       {
         id: '183',
@@ -159,104 +308,234 @@ export const deployGuardApi = {
         deployedBy: 'sarah.jenkins',
         timestamp: '2026-08-26T16:30:00Z',
         commitHash: 'e5f6g7h8',
-        description: 'Fix payment gateway retry handling logic'
+        description:
+          'Fix payment gateway retry handling logic'
       }
     ];
   },
 
-  async getDeploymentDetails(deploymentId: string = '184'): Promise<Deployment> {
+  // ----------------------------------------------------------
+  // DEPLOYMENT DETAILS
+  // ----------------------------------------------------------
+
+  async getDeploymentDetails(
+    deploymentId: string = '184'
+  ): Promise<Deployment> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/deployments/details/${deploymentId}`);
-      if (res.ok) return await res.json();
-    } catch {}
+      const res = await fetch(
+        `${API_BASE_URL}/deployments/details/${deploymentId}`
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+
+        return {
+          ...data,
+          id: data.id || deploymentId,
+          serviceId: data.serviceId || 'payment-api',
+          version: data.version || '1.8.3',
+          status: data.status || 'successful',
+          deployedBy: data.deployedBy || 'alex.chen',
+          timestamp:
+            data.timestamp || '2026-08-26T17:00:00Z',
+          commitHash: data.commitHash || 'a1b2c3d4',
+          description:
+            data.description ||
+            'Connection pool size and query timeout optimizations'
+        };
+      }
+
+    } catch {
+      // Fall through to simulator data.
+    }
 
     return {
       id: '184',
       serviceId: 'payment-api',
       version: '1.8.3',
-      status: fallbackServiceStatus.status === 'healthy' ? 'rolled_back' : 'successful',
+      status:
+        fallbackServiceStatus.status === 'healthy'
+          ? 'rolled_back'
+          : 'successful',
       deployedBy: 'alex.chen',
       timestamp: '2026-08-26T17:00:00Z',
       commitHash: 'a1b2c3d4',
-      description: 'Connection pool size and query timeout optimizations'
+      description:
+        'Connection pool size and query timeout optimizations'
     };
   },
 
-  /**
-   * Executes four explicit evidence retrieval stages (Service Health, Error Logs, Deployment History, Kubernetes State)
-   * with real-time state feedback (waiting -> checking -> complete).
-   */
+  // ==========================================================
+  // AI INCIDENT INVESTIGATION
+  // ==========================================================
+
   async runInvestigation(
     onStageUpdate?: (stages: StageStatus[]) => void
   ): Promise<DetailedInvestigationResult> {
+
     const stages: StageStatus[] = [
-      { id: 'health', name: '1. Service Health', subtext: 'Checking payment-api health and metrics', status: 'checking' },
-      { id: 'logs', name: '2. Error Logs', subtext: 'Analyzing recent production failures', status: 'waiting' },
-      { id: 'deployments', name: '3. Deployment History', subtext: 'Correlating failures with recent deployments', status: 'waiting' },
-      { id: 'k8s', name: '4. Kubernetes State', subtext: 'Inspecting pods, deployment state, logs and events', status: 'waiting' }
+      {
+        id: 'health',
+        name: '1. Service Health',
+        subtext:
+          'Checking payment-api health and metrics',
+        status: 'checking'
+      },
+      {
+        id: 'logs',
+        name: '2. Error Logs',
+        subtext:
+          'Analyzing recent production failures',
+        status: 'waiting'
+      },
+      {
+        id: 'deployments',
+        name: '3. Deployment History',
+        subtext:
+          'Correlating failures with recent deployments',
+        status: 'waiting'
+      },
+      {
+        id: 'k8s',
+        name: '4. Kubernetes State',
+        subtext:
+          'Inspecting pods, deployment state, logs and events',
+        status: 'waiting'
+      }
     ];
 
-    if (onStageUpdate) onStageUpdate([...stages]);
+    if (onStageUpdate) {
+      onStageUpdate([...stages]);
+    }
 
-    // Stage 1: Service Health
+    // --------------------------------------------------------
+    // STAGE 1: SERVICE HEALTH
+    // --------------------------------------------------------
+
     let status: ServiceStatus | null = null;
+
     try {
       status = await this.getServiceStatus('payment-api');
+
       stages[0].status = 'complete';
-      stages[0].details = `${status.status.toUpperCase()} (${status.errorRatePercent}% error rate)`;
+
+      stages[0].details =
+        `${status.status.toUpperCase()} (${status.errorRatePercent}% error rate)`;
+
     } catch {
       stages[0].status = 'failed';
       stages[0].details = 'Using cached status';
     }
+
     stages[1].status = 'checking';
-    if (onStageUpdate) onStageUpdate([...stages]);
+
+    if (onStageUpdate) {
+      onStageUpdate([...stages]);
+    }
+
     await new Promise((r) => setTimeout(r, 200));
 
-    // Stage 2: Error Logs
+    // --------------------------------------------------------
+    // STAGE 2: ERROR LOGS
+    // --------------------------------------------------------
+
     let logs: LogEntry[] = [];
+
     try {
-      logs = await this.getServiceLogs('payment-api', 'ERROR', 10);
+      logs = await this.getServiceLogs(
+        'payment-api',
+        'ERROR',
+        10
+      );
+
       stages[1].status = 'complete';
-      stages[1].details = `${logs.length} error entries correlated`;
+
+      stages[1].details =
+        `${logs.length} error entries correlated`;
+
     } catch {
       stages[1].status = 'failed';
       stages[1].details = 'Using local log stream';
     }
+
     stages[2].status = 'checking';
-    if (onStageUpdate) onStageUpdate([...stages]);
+
+    if (onStageUpdate) {
+      onStageUpdate([...stages]);
+    }
+
     await new Promise((r) => setTimeout(r, 200));
 
-    // Stage 3: Deployment History
+    // --------------------------------------------------------
+    // STAGE 3: DEPLOYMENT HISTORY
+    // --------------------------------------------------------
+
     let deployments: Deployment[] = [];
     let depDetails: Deployment | null = null;
+
     try {
-      deployments = await this.getRecentDeployments('payment-api');
-      depDetails = await this.getDeploymentDetails('184');
+      deployments =
+        await this.getRecentDeployments('payment-api');
+
+      depDetails =
+        await this.getDeploymentDetails('184');
+
       stages[2].status = 'complete';
-      stages[2].details = `Deployment #${depDetails?.id || '184'} (${depDetails?.version || 'v1.8.3'}) identified`;
+
+      stages[2].details =
+        `Deployment #${depDetails?.id || '184'} (${depDetails?.version || '1.8.3'}) identified`;
+
     } catch {
       stages[2].status = 'failed';
       stages[2].details = 'Using cached deployments';
     }
+
     stages[3].status = 'checking';
-    if (onStageUpdate) onStageUpdate([...stages]);
+
+    if (onStageUpdate) {
+      onStageUpdate([...stages]);
+    }
+
     await new Promise((r) => setTimeout(r, 200));
 
-    // Stage 4: Kubernetes State
+    // --------------------------------------------------------
+    // STAGE 4: KUBERNETES STATE
+    // --------------------------------------------------------
+
     let k8sPods: KubernetesPod[] | null = null;
     let k8sEvents: KubernetesEvent[] | null = null;
+
     try {
-      k8sPods = await this.getKubernetesPods();
-      k8sEvents = await this.getKubernetesEvents();
+      k8sPods =
+        await this.getKubernetesPods();
+
+      k8sEvents =
+        await this.getKubernetesEvents();
+
       stages[3].status = 'complete';
-      stages[3].details = `${k8sPods?.length || 7} pods, ${k8sEvents?.length || 2} cluster events`;
+
+      stages[3].details =
+        `${k8sPods?.length || 7} pods, ${k8sEvents?.length || 2} cluster events`;
+
     } catch {
       stages[3].status = 'failed';
-      stages[3].details = 'Using cluster telemetry cache';
+      stages[3].details =
+        'Using cluster telemetry cache';
     }
-    if (onStageUpdate) onStageUpdate([...stages]);
 
-    const activeDep = deployments.find((d) => d.id === '184') || depDetails;
+    if (onStageUpdate) {
+      onStageUpdate([...stages]);
+    }
+
+    // --------------------------------------------------------
+    // CORRELATE EVIDENCE
+    // --------------------------------------------------------
+
+    const activeDep =
+      deployments.find((d) => d.id === '184') ||
+      depDetails;
+
     const evidence: string[] = [
       'Connection pool reached 48/50 active connections',
       'Database connection timeouts followed',
@@ -265,183 +544,428 @@ export const deployGuardApi = {
       'Incident started shortly after deployment #184'
     ];
 
+    // --------------------------------------------------------
+    // FINAL INVESTIGATION RESULT
+    // --------------------------------------------------------
+
     return {
-      rootCause: `Deployment #${activeDep?.id || '184'} (${activeDep?.version || 'v1.8.3'}) introduced database connection pool exhaustion.`,
+      rootCause:
+        `Deployment #${activeDep?.id || '184'} (${activeDep?.version || '1.8.3'}) introduced database connection pool exhaustion.`,
+
       confidence: 'CONFIRMED',
+
       evidence,
+
       recommendation: {
-        action: `Rollback deployment #${activeDep?.id || '184'}`,
-        serviceId: 'payment-api',
-        deploymentId: activeDep?.id || '184',
-        fromVersion: activeDep?.version || 'v1.8.3',
-        toVersion: 'v1.8.2',
-        risk: 'HIGH',
-        reason: `The ${activeDep?.version || 'v1.8.3'} connection pool optimization correlates with the production failure.`
+        action:
+          `Rollback deployment #${activeDep?.id || '184'}`,
+
+        serviceId:
+          'payment-api',
+
+        deploymentId:
+          activeDep?.id || '184',
+
+        fromVersion:
+          activeDep?.version || '1.8.3',
+
+        toVersion:
+          '1.8.2',
+
+        risk:
+          'HIGH',
+
+        reason:
+          `The ${activeDep?.version || '1.8.3'} connection pool optimization correlates with the production failure.`
       },
+
       stages
     };
   },
 
-  async rollbackDeployment(deploymentId: string = '184'): Promise<RollbackResult> {
+  // ==========================================================
+  // ROLLBACK
+  // ==========================================================
+
+  async rollbackDeployment(
+    deploymentId: string = '184'
+  ): Promise<RollbackResult> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/rollback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deploymentId })
-      });
+      const res = await fetch(
+        `${API_BASE_URL}/rollback`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            deploymentId
+          })
+        }
+      );
+
       if (res.ok) {
         const data = await res.json();
-        if (data.serviceStatus) {
-          fallbackServiceStatus = data.serviceStatus;
-        }
-        return data;
-      } else {
-        const err = await res.json();
-        return { success: false, error: err.error || 'Rollback failed' };
-      }
-    } catch {}
 
-    // Fallback in-memory simulation if backend is offline
-    if (fallbackServiceStatus.status === 'healthy') {
+        if (data.serviceStatus) {
+          fallbackServiceStatus =
+            data.serviceStatus;
+        }
+
+        return data;
+      }
+
+      const err = await res.json();
+
       return {
         success: false,
-        error: `Error: Deployment #${deploymentId} has already been rolled back.`
+        error:
+          err.error || 'Rollback failed'
+      };
+
+    } catch {
+      // Backend unavailable, use deterministic simulator.
+    }
+
+    // --------------------------------------------------------
+    // FALLBACK ROLLBACK SIMULATION
+    // --------------------------------------------------------
+
+    if (
+      fallbackServiceStatus.status ===
+      'healthy'
+    ) {
+      return {
+        success: false,
+        error:
+          `Error: Deployment #${deploymentId} has already been rolled back.`
       };
     }
 
     fallbackServiceStatus = {
       ...fallbackServiceStatus,
+
       status: 'healthy',
+
       version: '1.8.2',
+
       errorRatePercent: 0.1,
+
       averageLatencyMs: 45,
+
       healthyInstances: 7,
+
       unhealthyInstances: 0,
-      updatedAt: new Date().toISOString()
+
+      updatedAt:
+        new Date().toISOString()
     };
 
     const audit: AuditRecord = {
-      timestamp: new Date().toISOString(),
+      timestamp:
+        new Date().toISOString(),
+
       deploymentId,
-      service: 'payment-api',
-      fromVersion: 'v1.8.3',
-      restoredVersion: 'v1.8.2',
-      reason: `Simulated rollback of deployment #${deploymentId} for service payment-api`,
+
+      service:
+        'payment-api',
+
+      fromVersion:
+        'v1.8.3',
+
+      restoredVersion:
+        'v1.8.2',
+
+      reason:
+        `Simulated rollback of deployment #${deploymentId} for service payment-api`,
+
       simulated: true,
-      resultingStatus: 'healthy'
+
+      resultingStatus:
+        'healthy'
     };
 
     fallbackAudits.push(audit);
 
     return {
       success: true,
+
       deploymentId,
-      serviceId: 'payment-api',
-      previousVersion: 'v1.8.3',
-      restoredVersion: 'v1.8.2',
+
+      serviceId:
+        'payment-api',
+
+      previousVersion:
+        'v1.8.3',
+
+      restoredVersion:
+        'v1.8.2',
+
       simulated: true,
-      serviceStatus: fallbackServiceStatus,
-      auditRecord: audit
+
+      serviceStatus:
+        fallbackServiceStatus,
+
+      auditRecord:
+        audit
     };
   },
 
+  // ==========================================================
+  // AUDIT LOGS
+  // ==========================================================
+
   async getRollbackAudits(): Promise<AuditRecord[]> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/audits`);
-      if (res.ok) return await res.json();
-    } catch {}
+      const res = await fetch(
+        `${API_BASE_URL}/audits`
+      );
+
+      if (res.ok) {
+        return await res.json();
+      }
+
+    } catch {
+      // Fall through to local audit state.
+    }
 
     return fallbackAudits;
   },
 
-  async getKubernetesDeployment(name: string = 'payment-api', namespace: string = 'default'): Promise<KubernetesDeployment | null> {
+  // ==========================================================
+  // KUBERNETES DEPLOYMENT
+  // ==========================================================
+
+  async getKubernetesDeployment(
+    name: string = 'payment-api',
+    namespace: string = 'default'
+  ): Promise<KubernetesDeployment | null> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/kubernetes/deployment/${name}?namespace=${namespace}`);
-      if (res.ok) return await res.json();
-    } catch {}
+      const res = await fetch(
+        `${API_BASE_URL}/kubernetes/deployment/${name}?namespace=${namespace}`
+      );
+
+      if (res.ok) {
+        return await res.json();
+      }
+
+    } catch {
+      // Fall through to simulator.
+    }
 
     return {
       name: 'payment-api',
+
       namespace: 'default',
+
       replicas: {
         desired: 7,
-        ready: fallbackServiceStatus.status === 'healthy' ? 7 : 2,
-        available: fallbackServiceStatus.status === 'healthy' ? 7 : 2,
+
+        ready:
+          fallbackServiceStatus.status === 'healthy'
+            ? 7
+            : 2,
+
+        available:
+          fallbackServiceStatus.status === 'healthy'
+            ? 7
+            : 2,
+
         updated: 7
       },
+
       containers: [
         {
           name: 'payment-api',
-          image: `registry.internal/payment-api:${fallbackServiceStatus.version}`
+
+          image:
+            `registry.internal/payment-api:${fallbackServiceStatus.version}`
         }
       ],
-      status: fallbackServiceStatus.status === 'healthy' ? 'Running' : 'Degraded',
-      updatedAt: '2026-08-26T17:00:00Z'
+
+      status:
+        fallbackServiceStatus.status === 'healthy'
+          ? 'Running'
+          : 'Degraded',
+
+      updatedAt:
+        '2026-08-26T17:00:00Z'
     };
   },
 
-  async getKubernetesPods(namespace: string = 'default', labelSelector?: string): Promise<KubernetesPod[] | null> {
-    try {
-      const params = new URLSearchParams({ namespace });
-      if (labelSelector) params.append('labelSelector', labelSelector);
-      const res = await fetch(`${API_BASE_URL}/kubernetes/pods?${params.toString()}`);
-      if (res.ok) return await res.json();
-    } catch {}
+  // ==========================================================
+  // KUBERNETES PODS
+  // ==========================================================
 
-    const isHealthy = fallbackServiceStatus.status === 'healthy';
+  async getKubernetesPods(
+    namespace: string = 'default',
+    labelSelector?: string
+  ): Promise<KubernetesPod[] | null> {
+
+    try {
+      const params =
+        new URLSearchParams({
+          namespace
+        });
+
+      if (labelSelector) {
+        params.append(
+          'labelSelector',
+          labelSelector
+        );
+      }
+
+      const res = await fetch(
+        `${API_BASE_URL}/kubernetes/pods?${params.toString()}`
+      );
+
+      if (res.ok) {
+        return await res.json();
+      }
+
+    } catch {
+      // Fall through to simulator.
+    }
+
+    const isHealthy =
+      fallbackServiceStatus.status ===
+      'healthy';
 
     return [
       {
-        name: 'payment-api-79f9d8459-x8j2p',
-        namespace: 'default',
-        phase: 'Running',
-        ready: isHealthy ? '1/1' : '0/1',
-        restarts: isHealthy ? 0 : 4,
-        node: 'kind-control-plane',
-        ip: '10.244.0.5',
-        age: '2h'
+        name:
+          'payment-api-79f9d8459-x8j2p',
+
+        namespace:
+          'default',
+
+        phase:
+          'Running',
+
+        ready:
+          isHealthy ? '1/1' : '0/1',
+
+        restarts:
+          isHealthy ? 0 : 4,
+
+        node:
+          'kind-control-plane',
+
+        ip:
+          '10.244.0.5',
+
+        age:
+          '2h'
       },
+
       {
-        name: 'payment-api-79f9d8459-k4m9n',
-        namespace: 'default',
-        phase: 'Running',
-        ready: isHealthy ? '1/1' : '0/1',
-        restarts: isHealthy ? 0 : 3,
-        node: 'kind-control-plane',
-        ip: '10.244.0.6',
-        age: '2h'
+        name:
+          'payment-api-79f9d8459-k4m9n',
+
+        namespace:
+          'default',
+
+        phase:
+          'Running',
+
+        ready:
+          isHealthy ? '1/1' : '0/1',
+
+        restarts:
+          isHealthy ? 0 : 3,
+
+        node:
+          'kind-control-plane',
+
+        ip:
+          '10.244.0.6',
+
+        age:
+          '2h'
       },
+
       {
-        name: 'payment-api-79f9d8459-p9q2r',
-        namespace: 'default',
-        phase: 'Running',
-        ready: '1/1',
-        restarts: 0,
-        node: 'kind-worker-1',
-        ip: '10.244.1.12',
-        age: '2h'
+        name:
+          'payment-api-79f9d8459-p9q2r',
+
+        namespace:
+          'default',
+
+        phase:
+          'Running',
+
+        ready:
+          '1/1',
+
+        restarts:
+          0,
+
+        node:
+          'kind-worker-1',
+
+        ip:
+          '10.244.1.12',
+
+        age:
+          '2h'
       },
+
       {
-        name: 'payment-api-79f9d8459-w8z1v',
-        namespace: 'default',
-        phase: 'Running',
-        ready: '1/1',
-        restarts: 0,
-        node: 'kind-worker-2',
-        ip: '10.244.2.8',
-        age: '2h'
+        name:
+          'payment-api-79f9d8459-w8z1v',
+
+        namespace:
+          'default',
+
+        phase:
+          'Running',
+
+        ready:
+          '1/1',
+
+        restarts:
+          0,
+
+        node:
+          'kind-worker-2',
+
+        ip:
+          '10.244.2.8',
+
+        age:
+          '2h'
       }
     ];
   },
 
-  async getKubernetesPodLogs(podName: string = 'payment-api-79f9d8459-x8j2p', namespace: string = 'default'): Promise<string | null> {
+  // ==========================================================
+  // KUBERNETES POD LOGS
+  // ==========================================================
+
+  async getKubernetesPodLogs(
+    podName: string =
+      'payment-api-79f9d8459-x8j2p',
+    namespace: string = 'default'
+  ): Promise<string | null> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/kubernetes/logs?podName=${podName}&namespace=${namespace}`);
+      const res = await fetch(
+        `${API_BASE_URL}/kubernetes/logs?podName=${podName}&namespace=${namespace}`
+      );
+
       if (res.ok) {
-        const data = await res.json();
+        const data =
+          await res.json();
+
         return data.logs;
       }
-    } catch {}
+
+    } catch {
+      // Fall through to simulator.
+    }
 
     return `2026-08-26T17:00:00.000Z [INFO] Initializing payment-api container (v1.8.3)
 2026-08-26T17:00:05.120Z [INFO] Database pool configured: min=10 max=50 acquireTimeout=5000ms
@@ -451,36 +975,86 @@ export const deployGuardApi = {
 2026-08-26T17:04:30.901Z [FATAL] Liveness probe failure on /healthz: status 500`;
   },
 
-  async getKubernetesEvents(namespace: string = 'default'): Promise<KubernetesEvent[] | null> {
+  // ==========================================================
+  // KUBERNETES EVENTS
+  // ==========================================================
+
+  async getKubernetesEvents(
+    namespace: string = 'default'
+  ): Promise<KubernetesEvent[] | null> {
+
     try {
-      const res = await fetch(`${API_BASE_URL}/kubernetes/events?namespace=${namespace}`);
-      if (res.ok) return await res.json();
-    } catch {}
+      const res = await fetch(
+        `${API_BASE_URL}/kubernetes/events?namespace=${namespace}`
+      );
+
+      if (res.ok) {
+        return await res.json();
+      }
+
+    } catch {
+      // Fall through to simulator.
+    }
 
     return [
       {
-        type: 'Warning',
-        reason: 'Unhealthy',
-        object: 'pod/payment-api-79f9d8459-x8j2p',
-        message: 'Liveness probe failed: HTTP probe failed with statuscode: 500',
-        timestamp: '2026-08-26T17:04:30Z',
-        count: 5
+        type:
+          'Warning',
+
+        reason:
+          'Unhealthy',
+
+        object:
+          'pod/payment-api-79f9d8459-x8j2p',
+
+        message:
+          'Liveness probe failed: HTTP probe failed with statuscode: 500',
+
+        timestamp:
+          '2026-08-26T17:04:30Z',
+
+        count:
+          5
       },
+
       {
-        type: 'Normal',
-        reason: 'Started',
-        object: 'pod/payment-api-79f9d8459-x8j2p',
-        message: 'Started container payment-api',
-        timestamp: '2026-08-26T17:00:05Z',
-        count: 1
+        type:
+          'Normal',
+
+        reason:
+          'Started',
+
+        object:
+          'pod/payment-api-79f9d8459-x8j2p',
+
+        message:
+          'Started container payment-api',
+
+        timestamp:
+          '2026-08-26T17:00:05Z',
+
+        count:
+          1
       },
+
       {
-        type: 'Normal',
-        reason: 'Scheduled',
-        object: 'pod/payment-api-79f9d8459-x8j2p',
-        message: 'Successfully assigned default/payment-api-79f9d8459-x8j2p to kind-control-plane',
-        timestamp: '2026-08-26T17:00:01Z',
-        count: 1
+        type:
+          'Normal',
+
+        reason:
+          'Scheduled',
+
+        object:
+          'pod/payment-api-79f9d8459-x8j2p',
+
+        message:
+          'Successfully assigned default/payment-api-79f9d8459-x8j2p to kind-control-plane',
+
+        timestamp:
+          '2026-08-26T17:00:01Z',
+
+        count:
+          1
       }
     ];
   }

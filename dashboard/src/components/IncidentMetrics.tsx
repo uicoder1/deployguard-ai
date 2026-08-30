@@ -8,67 +8,101 @@ interface IncidentMetricsProps {
 export const IncidentMetrics: React.FC<IncidentMetricsProps> = ({ status }) => {
   const isHealthy = status.status.toLowerCase() === 'healthy';
 
+  const totalPods =
+    status.healthyInstances + status.unhealthyInstances;
+
+  const deploymentNumber = isHealthy ? '#183' : '#184';
+  const version = status.version || (isHealthy ? '1.8.2' : '1.8.3');
+
   return (
     <div className="bg-white border border-gray-200 rounded-lg p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+
       {/* ERROR RATE */}
       <div className="space-y-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 block">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
           Error Rate
         </span>
-        <div className="flex items-baseline space-x-2">
-          <span className={`text-2xl font-bold tracking-tight ${isHealthy ? 'text-emerald-600' : 'text-red-600'}`}>
+
+        <div className="flex items-baseline gap-2">
+          <span
+            className={`text-2xl font-bold ${isHealthy ? 'text-emerald-600' : 'text-red-600'
+              }`}
+          >
             {status.errorRatePercent}%
           </span>
+
           <span className="text-xs text-gray-400">
-            {isHealthy ? 'Nominal' : 'Elevated'}
+            {isHealthy ? 'Healthy' : 'Critical'}
           </span>
         </div>
       </div>
 
       {/* LATENCY */}
       <div className="space-y-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 block">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
           Average Latency
         </span>
-        <div className="flex items-baseline space-x-2">
-          <span className={`text-2xl font-bold tracking-tight ${isHealthy ? 'text-gray-900' : 'text-red-600'}`}>
+
+        <div className="flex items-baseline gap-2">
+          <span
+            className={`text-2xl font-bold ${isHealthy ? 'text-gray-900' : 'text-red-600'
+              }`}
+          >
             {status.averageLatencyMs} ms
           </span>
+
           <span className="text-xs text-gray-400">
-            {isHealthy ? 'p99 45ms' : 'p99 spike'}
+            {isHealthy ? 'Normal' : 'High'}
           </span>
         </div>
       </div>
 
       {/* HEALTHY PODS */}
       <div className="space-y-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 block">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
           Healthy Pods
         </span>
-        <div className="flex items-baseline space-x-2">
-          <span className={`text-2xl font-bold tracking-tight ${isHealthy ? 'text-emerald-600' : 'text-red-600'}`}>
-            {status.healthyInstances} / {status.healthyInstances + status.unhealthyInstances}
+
+        <div className="flex items-baseline gap-2">
+          <span
+            className={`text-2xl font-bold ${isHealthy ? 'text-emerald-600' : 'text-red-600'
+              }`}
+          >
+            {status.healthyInstances} / {totalPods}
           </span>
+
           <span className="text-xs text-gray-400">
-            {isHealthy ? 'All Ready' : '5 Failing'}
+            {isHealthy
+              ? 'All Ready'
+              : `${status.unhealthyInstances} failing`}
           </span>
         </div>
       </div>
 
       {/* DEPLOYMENT */}
       <div className="space-y-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 block">
-          Deployment
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+          Active Deployment
         </span>
-        <div className="flex items-baseline space-x-2">
-          <span className="text-2xl font-bold tracking-tight text-gray-900 font-mono">
-            {isHealthy ? 'v1.8.2' : '#184'}
+
+        <div className="flex items-baseline gap-2">
+          <span className="text-2xl font-bold text-gray-900 font-mono">
+            {deploymentNumber}
           </span>
+
           <span className="text-xs text-gray-500 font-mono">
-            {isHealthy ? '#183' : `v${status.version}`}
+            v{version}
           </span>
         </div>
+
+        <span
+          className={`text-xs font-semibold ${isHealthy ? 'text-emerald-600' : 'text-red-600'
+            }`}
+        >
+          {isHealthy ? 'Recovered' : 'Failing'}
+        </span>
       </div>
+
     </div>
   );
 };
