@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/deployguard-banner.png" alt="DeployGuard Banner" width="100%">
+</p>
+
 # DeployGuard
 
 AI-powered production incident response agent built on [TrueForge](https://github.com/truefoundry/trueforge) for The Agent Harness Hackathon.
